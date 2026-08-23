@@ -62,7 +62,7 @@ CANVAS_HEIGHT_CORE = HEADER_HEIGHT + GRID_ROWS * CELL_H + FOOTER_HEIGHT
 # Full Sync, Sync Play, 5, 4, 3, 2, 1 as requested.
 _RIGHT_COLUMN_ORDER = [
     ("combo", "fc"), ("combo", "fcp"), ("combo", "ap"), ("combo", "app"),
-    ("sync", "fsp"), ("sync", "fdx"), ("sync", "fdxp"),
+    ("sync", "fdxp"), ("sync", "fdx"), ("sync", "fsp"),
     ("sync", "fs"), ("sync", "sync"),
     ("dxstar", "5"), ("dxstar", "4"), ("dxstar", "3"), ("dxstar", "2"), ("dxstar", "1"),
 ]
