@@ -54,9 +54,19 @@ def _build_generic_embed(song: Song) -> discord.Embed:
 async def _build_detailed_embed(song: Song, difficulty: Difficulty) -> discord.Embed:
     matching_sheets = [s for s in song.sheets if s.difficulty == difficulty]
 
+    # All difficulties of a chart are assumed to have been added in the same
+    # update, so show the version once for the embed rather than per-sheet.
+    version_sheet = next((s for s in matching_sheets if s.version), None)
+    description_lines = [song.artist] if song.artist else []
+    if version_sheet:
+        version_line = f"Version: {version_sheet.version}"
+        if version_sheet.release_date:
+            version_line += f" ({version_sheet.release_date})"
+        description_lines.append(version_line)
+
     embed = discord.Embed(
         title=f"{song.title} [{difficulty.display_name}]",
-        description=song.artist or "",
+        description="\n".join(description_lines),
         color=embed_colors.difficulty_color(difficulty),
     )
 
@@ -69,8 +79,6 @@ async def _build_detailed_embed(song: Song, difficulty: Difficulty) -> discord.E
     for sheet in matching_sheets:
         type_name = sheet.type.value.upper() if sheet.type else "?"
         lines = [f"Level **{sheet.level}** (constant {sheet.internal_level_value})"]
-        if sheet.version:
-            lines.append(f"Version: {sheet.version}" + (f" ({sheet.release_date})" if sheet.release_date else ""))
         if sheet.note_designer and sheet.note_designer.strip("-").strip():
             # dxdata.json uses a literal "-" placeholder for uncredited charts
             lines.append(f"Charter: {sheet.note_designer}")
