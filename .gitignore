@@ -8,7 +8,8 @@ temporary/
 *.key
 *.db
 *.bat
-data/
+data/badge_icons_cache
+data/jackets_cache
 CLAUDE.md
 im_a_filthy_vibecoder_lmfao.txt
 startcirclechiffon.bat
