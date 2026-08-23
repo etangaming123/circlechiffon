@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<link rel="icon" href="siteresources/icon.png">
+		<link rel="icon" href="siteresources/icon.png">
+		<meta charset="UTF-8">		
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<title>etan://cc/privacypolicy</title>
+		<meta name="etangaming.xyz" content="CiRCLE Chiffon privacy policy">
+		<meta name="description" content="privacy policy for CiRCLE Chiffon, a maimai DX NET Discord bot.">
+
+		<meta property="og:type" content="website">
+		<meta property="og:title" content="CiRCLE Chiffon">
+		<meta property="og:description" content="privacy policy for CiRCLE Chiffon">
+
+		<meta name="theme-color" content="#FBD796">
+		<!-- Bootstrap -->
+		<link href="siteresources/bootstrap-4.4.1.css" rel="stylesheet">
+		<link href="siteresources/style.css" rel="stylesheet">
+	</head>
+	<body>
+		<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+		<a class="navbar-brand" href="./index.html">[back to CiRCLE Chiffon]</a>
+		</div>
+		</nav>
+		<section>
+		<div class="jumbotron text-center mt-2">
+			<div class="container">
+			<div class="row">
+				<div class="col-12" class="ether-logo-text-container">
+				<img src="siteresources/icon.png" alt="CiRCLE Chiffon icon" title="CiRCLE Chiffon icon" id="etanboticon">
+				<div>
+					<h1 class="WRAPITUPBRO darkbluetext">CiRCLE Chiffon Privacy Policy</h1>
+					<p class="darkbluetext WRAPITUPBRO">a maimai DX NET discord bot</p>
+				</div>
+				</div>
+			</div>
+			</div>
+		</div>
+		</section>
+		<section>
+		<div class="container">
+			<div class="row">
+			<div class="col-12 text-left" id="markdownContent">
+				<p class="text-center">Loading...</p>
+			</div>
+			</div>
+		</div>
+		</section>
+		<hr>
+		<section>
+		<div class="container">
+			<div class="row">
+			<div class="col-12 text-center">
+				<p>This Privacy Policy is also available in Privacy_Policy.md.</p>
+				<button type="button" class="btn btn-success" onclick="window.location.href='https://github.com/etangaming123/circlechiffon/blob/main/Privacy_Policy.md'">Open Privacy_Policy.md</button>
+			</div>
+			</div>
+		</div>
+		</section>
+		<section>
+		<div class="container">
+			<div class="row">
+			<div class="col-12 text-center">
+				<h1>Go back?</h1>
+				<button type="button" class="btn btn-success" onclick="window.location.href=`index.html`">Back to main page</button>
+			</div>
+			</div>
+		</div>
+		</section>
+		<hr>
+		<footer class="text-center">
+		<div class="container">
+			<div class="row">
+			<div class="col-12">
+				<!-- idk if i actually have to include this copyright notice, but better to stay on the safe side, amirite? -->
+				<p> * <a href="https://getbootstrap.com/" target="_blank">Bootstrap v4.4.1</a><br> * Copyright 2011-2019 The Bootstrap Authors<br> * Copyright 2011-2019 Twitter, Inc.<br> * Licensed under <a href="https://github.com/twbs/bootstrap/blob/master/LICENSE" target="_blank">MIT</a></p> 
+				<p>CiRCLE Chiffon • etangaming123 • etangamingxyz</p>
+			</div>
+			</div>
+		</div>
+		</footer>
+		<script src="siteresources/marked.min.js"></script> <!-- markdown parser, renders Privacy_Policy.md below -->
+		<script>
+			marked.setOptions({ breaks: true, gfm: true });
+			fetch('Privacy_Policy.md')
+				.then(response => response.text())
+				.then(markdown => {
+					document.getElementById('markdownContent').innerHTML = marked.parse(markdown);
+				})
+				.catch(() => {
+					document.getElementById('markdownContent').innerHTML = '<p class="text-center">Couldn\'t load Privacy_Policy.md.</p>';
+				});
+		</script>
+		<!-- jQuery (necessary for Bootstrap's JavaScript plugins) -->
+		<script src="siteresources/jquery-3.4.1.min.js"></script>
+		<!-- Include all compiled plugins (below), or include individual files as needed -->
+		<script src="siteresources/popper.min.js"></script>
+		<script src="siteresources/bootstrap-4.4.1.js"></script>
+	</body>
+	</html>

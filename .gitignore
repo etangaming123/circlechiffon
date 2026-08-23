@@ -1,0 +1,14 @@
+*.code-workspace
+*.json
+.DS_Store
+.venv
+.vscode
+__pycache__
+temporary/
+*.key
+*.db
+*.bat
+data/
+CLAUDE.md
+im_a_filthy_vibecoder_lmfao.txt
+startcirclechiffon.bat

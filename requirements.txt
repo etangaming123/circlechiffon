@@ -1,0 +1,8 @@
+discord.py>=2.4
+httpx>=0.27
+selectolax>=0.3
+sqlalchemy[asyncio]>=2.0
+aiosqlite>=0.20
+cryptography>=42
+aiolimiter>=1.1
+Pillow>=10
