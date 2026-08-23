@@ -8,6 +8,7 @@ from config import config
 from circlechiffon.cogs import COG_LIST
 from circlechiffon.database import engine as db_engine
 from circlechiffon.songdata.catalog import get_catalog
+from generate_templates import generate_missing
 
 intents = discord.Intents.default()
 
@@ -18,6 +19,10 @@ class CircleChiffon(commands.Bot):
         await db_engine.create_all()
 
         get_catalog()  # load the song catalog once at startup
+
+        written = generate_missing()
+        if written:
+            print(f"Generated missing renderer guide template(s): {', '.join(written)}")
 
         for item in COG_LIST:
             try:
