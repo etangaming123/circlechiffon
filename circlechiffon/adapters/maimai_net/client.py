@@ -1,4 +1,5 @@
 import asyncio
+import http.cookiejar
 import json
 from typing import Awaitable, Callable
 
@@ -56,7 +57,37 @@ class MaimaiNetClient:
     def __init__(self, cookies: list[dict] | None = None):
         initial_jar = httpx.Cookies()
         for c in cookies or []:
-            initial_jar.set(c["name"], c["value"], domain=c.get("domain", ""), path=c.get("path", "/"))
+            # built via http.cookiejar.Cookie directly rather than
+            # httpx.Cookies.set() - that helper hardcodes secure=False and
+            # expires=None regardless of what's passed in, silently
+            # discarding those attributes from the real Set-Cookie response
+            # every time a session is reloaded from storage. Faithfully
+            # round-tripping them so a reloaded session matches the one that
+            # was actually issued as closely as possible.
+            domain = c.get("domain", "")
+            path = c.get("path", "/")
+            expires = c.get("expires")
+            initial_jar.jar.set_cookie(
+                http.cookiejar.Cookie(
+                    version=0,
+                    name=c["name"],
+                    value=c["value"],
+                    port=None,
+                    port_specified=False,
+                    domain=domain,
+                    domain_specified=bool(domain),
+                    domain_initial_dot=domain.startswith("."),
+                    path=path,
+                    path_specified=bool(path),
+                    secure=c.get("secure", False),
+                    expires=expires,
+                    discard=expires is None,
+                    comment=None,
+                    comment_url=None,
+                    rest={"HttpOnly": None},
+                    rfc2109=False,
+                )
+            )
         self._client = httpx.AsyncClient(
             headers=_COMMON_HEADERS,
             cookies=initial_jar,
@@ -86,7 +117,14 @@ class MaimaiNetClient:
         # httpx.CookieConflict - collapsing to a flat dict also silently
         # discards which host each cookie belongs to.
         return [
-            {"name": c.name, "value": c.value, "domain": c.domain, "path": c.path}
+            {
+                "name": c.name,
+                "value": c.value,
+                "domain": c.domain,
+                "path": c.path,
+                "secure": c.secure,
+                "expires": c.expires,
+            }
             for c in self._client.cookies.jar
         ]
 

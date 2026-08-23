@@ -37,7 +37,12 @@ def _build_generic_embed(song: Song) -> discord.Embed:
         diff_name = sheet.difficulty.display_name if sheet.difficulty else "UTAGE"
         type_name = sheet.type.value.upper() if sheet.type else "?"
         const_str = f" (constant {sheet.internal_level_value})" if sheet.internal_level_value else ""
-        lines.append(f"**{diff_name}** [{type_name}] - {sheet.level}{const_str}")
+        version_str = (
+            f" - Version: {sheet.version}" + (f" ({sheet.release_date})" if sheet.release_date else "")
+            if sheet.version
+            else ""
+        )
+        lines.append(f"**{diff_name}** [{type_name}] - {sheet.level}{const_str}{version_str}")
 
     embed = discord.Embed(title=song.title, description=song.artist or "", color=embed_colors.GENERIC)
     embed.add_field(name="Charts", value="\n".join(lines) or "No chart data", inline=False)
@@ -116,7 +121,7 @@ class CheckScoreView(discord.ui.View):
         # imported lazily to avoid a module-load-time circular import
         # (cogs.score imports SongsCog from this module for its own
         # autocomplete reuse).
-        from circlechiffon.cogs.score import build_score_view
+        from circlechiffon.cogs.score import NoScoresRecorded, build_score_view
 
         await interaction.response.send_message("Getting data...")
         invoker_id = interaction.user.id
@@ -131,6 +136,9 @@ class CheckScoreView(discord.ui.View):
             return
         except SessionExpired as e:
             await interaction.edit_original_response(content=str(e))
+            return
+        except NoScoresRecorded:
+            await interaction.edit_original_response(content="You don't have any scores for that chart...")
             return
         except MaimaiNetError as e:
             await interaction.edit_original_response(content=f"Couldn't fetch your scores: {e}")

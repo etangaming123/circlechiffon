@@ -131,13 +131,13 @@ class _TrackSelect(discord.ui.Select):
     static once sent, they're not derived at render time like the embeds
     are, so this has to be done explicitly on every Prev/Next/Back click."""
 
-    def __init__(self, parent: "RecentScoresView"):
+    def __init__(self, owner: "RecentScoresView"):
         super().__init__(placeholder="View detailed stats for a track...", min_values=1, max_values=1, row=1)
-        self._parent = parent
+        self._owner = owner
         self.refresh_options()
 
     def refresh_options(self):
-        page = self._parent.pages[self._parent.index]
+        page = self._owner.pages[self._owner.index]
         options = []
         for i, (score, _embed, _jacket) in enumerate(page):
             track_label = f"TRACK {score.track_no:02d}" if score.track_no is not None else "TRACK ??"
@@ -148,7 +148,7 @@ class _TrackSelect(discord.ui.Select):
         self.options = options
 
     async def callback(self, interaction: discord.Interaction):
-        await self._parent.on_track_selected(interaction, int(self.values[0]))
+        await self._owner.on_track_selected(interaction, int(self.values[0]))
 
 
 class RecentScoresView(discord.ui.View):

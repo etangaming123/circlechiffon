@@ -1,7 +1,15 @@
 import os
+from pathlib import Path
+
 from cryptography.fernet import Fernet
 
-KEY_FILE = ".circlechiffon.key"
+# anchored to this file's own directory rather than a bare relative filename -
+# a bare name resolves against the process's current working directory, which
+# on Windows can silently differ from the repo directory depending on launch
+# method (desktop shortcut, Task Scheduler, a service wrapper, etc.), causing
+# a brand-new key to be generated and every previously-encrypted value (the
+# session cookie, stored credentials) to become undecryptable.
+KEY_FILE = str(Path(__file__).resolve().parent / ".circlechiffon.key")
 ENV_KEY_VAR = "CIRCLECHIFFON_ENCRYPTION_KEY"
 
 _env_fernet = None

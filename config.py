@@ -1,9 +1,13 @@
 import json
 import os
+from pathlib import Path
 
 import crypto_utils
 
-CONFIG_PATH = "config.json"
+# anchored to this file's own directory - see crypto_utils.KEY_FILE's comment
+# for why a bare relative filename is a Windows-launch-context hazard.
+_BASE_DIR = Path(__file__).resolve().parent
+CONFIG_PATH = str(_BASE_DIR / "config.json")
 
 _DEFAULTS = {
     "token": "your bot token here",
@@ -48,7 +52,12 @@ class Config:
 
         self.token = plaintext
         self.owner_id = data.get("owner_id")
-        self.db_path = data.get("db_path", "circlechiffon.db")
+        # a relative db_path (including the shipped default) is anchored here
+        # rather than left to resolve against the process's CWD, same reason
+        # as CONFIG_PATH/KEY_FILE above - an absolute path the user set
+        # explicitly is left untouched.
+        raw_db_path = data.get("db_path", "circlechiffon.db")
+        self.db_path = raw_db_path if os.path.isabs(raw_db_path) else str(_BASE_DIR / raw_db_path)
 
 
 config = Config()

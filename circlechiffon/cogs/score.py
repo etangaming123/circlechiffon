@@ -14,6 +14,11 @@ from circlechiffon.types import Difficulty, Score, Song, SongPlayStats
 _DIFFICULTY_ORDER = [Difficulty.basic, Difficulty.advanced, Difficulty.expert, Difficulty.master, Difficulty.remaster]
 
 
+class NoScoresRecorded(Exception):
+    """Raised by build_score_view() when the song has standard-difficulty
+    charts but the player has no recorded score on any of them."""
+
+
 def available_difficulties(song: Song) -> list[Difficulty]:
     present = {s.difficulty for s in song.sheets if s.difficulty is not None}
     return [d for d in _DIFFICULTY_ORDER if d in present]
@@ -148,7 +153,12 @@ async def build_score_view(
         return scores, play_stats
 
     scores, play_stats = await accounts.with_client(invoker_id, fetch, on_retry=on_retry)
-    return ScoreToggleView(invoker_id, song, scores, difficulties, play_stats)
+
+    scored_difficulties = [d for d in difficulties if _matching_scores(scores, song.title, d)]
+    if not scored_difficulties:
+        raise NoScoresRecorded()
+
+    return ScoreToggleView(invoker_id, song, scores, scored_difficulties, play_stats)
 
 
 class ScoreCog(commands.Cog):
@@ -190,6 +200,8 @@ class ScoreCog(commands.Cog):
             )
         except SessionExpired as e:
             await interaction.edit_original_response(content=str(e))
+        except NoScoresRecorded:
+            await interaction.edit_original_response(content="You don't have any scores for that chart...")
         except MaimaiNetError as e:
             await interaction.edit_original_response(content=f"Couldn't fetch your scores: {e}")
         except Exception as e:

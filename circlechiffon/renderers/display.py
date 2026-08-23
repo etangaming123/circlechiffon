@@ -8,6 +8,7 @@ from circlechiffon.renderers.b50 import (
     RATING_ACCENT_COLOR as RATING_TEXT_COLOR,
     _TIER_COLORS,
     _diagonal_gradient,
+    _draw_guide_box,
     _fit_font,
     _hex_to_rgb,
     _paste_rating_badge,
@@ -392,6 +393,59 @@ def render_display(
     #         stroke_width=2,
     #         stroke_fill=_hex_to_rgb(RIBBON_GRADIENT_1),
     #     )
+
+    image.save(output, "PNG", compress_level=3)
+    output.seek(0)
+
+
+def render_display_template(output) -> None:
+    """Synchronous, no live data needed. Renders a transparent-background
+    guide PNG at the exact /cc-display canvas size, with labeled outline
+    boxes at every position render_display() actually draws content -
+    meant to be opened in an external image editor to design a Frame
+    background around the real content instead of guessing at its layout."""
+    image = Image.new("RGBA", (CANVAS_W, CANVAS_H), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+
+    _draw_guide_box(draw, (NAMEPLATE_X, NAMEPLATE_Y, NAMEPLATE_X + NAMEPLATE_W, NAMEPLATE_Y + NAMEPLATE_H), "NAMEPLATE INSET")
+    _draw_guide_box(draw, (ICON_X, ICON_Y, ICON_X + ICON_SIZE, ICON_Y + ICON_SIZE), "ICON", color=(0, 200, 255))
+
+    content_w = CONTENT_RIGHT - CONTENT_X
+
+    row_a_y = NAMEPLATE_Y + ROW_A_Y
+    _draw_guide_box(draw, (CONTENT_X, row_a_y, CONTENT_X + 150, row_a_y + ROW_A_H), "RATING BADGE", color=(0, 200, 255))
+    _draw_guide_box(
+        draw,
+        (CONTENT_X + 150 + CLASS_GAP, row_a_y, CONTENT_X + 150 + CLASS_GAP + round(content_w * 0.22), row_a_y + round(ROW_A_H * 1.15)),
+        "CLASS BADGE",
+        color=(0, 200, 255),
+    )
+
+    row_b_y = NAMEPLATE_Y + ROW_B_Y
+    name_pad, name_text_w, name_badge_gap, name_badge_w = 8, 170, 6, 80
+    name_box_w = name_pad + name_text_w + name_badge_gap + name_badge_w + name_pad
+    _draw_guide_box(draw, (CONTENT_X, row_b_y, CONTENT_X + name_box_w, row_b_y + ROW_B_H), "NAME BOX")
+    _draw_guide_box(
+        draw,
+        (CONTENT_X + name_pad, row_b_y, CONTENT_X + name_pad + name_text_w, row_b_y + ROW_B_H),
+        "PLAYER NAME",
+        color=(0, 200, 255),
+    )
+    _draw_guide_box(
+        draw,
+        (
+            CONTENT_X + name_pad + name_text_w + name_badge_gap,
+            row_b_y,
+            CONTENT_X + name_pad + name_text_w + name_badge_gap + name_badge_w,
+            row_b_y + ROW_B_H,
+        ),
+        "DAN/COURSE RANK BADGE",
+        color=(0, 200, 255),
+    )
+
+    row_c_y = NAMEPLATE_Y + ROW_C_Y
+    title_box_w = min(270, round(content_w * 0.58))
+    _draw_guide_box(draw, (CONTENT_X, row_c_y, CONTENT_X + title_box_w, row_c_y + ROW_C_H), "TITLE CAPSULE")
 
     image.save(output, "PNG", compress_level=3)
     output.seek(0)
