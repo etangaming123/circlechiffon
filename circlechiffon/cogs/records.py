@@ -257,6 +257,7 @@ class RecordsCog(commands.Cog):
         if not await access.handle_command_access(interaction, interaction.user.id, "cc-recent", access.MAIMAI_NET_COOLDOWN):
             return
         await interaction.response.defer()
+        await interaction.edit_original_response(content="Getting data...")
 
         async def fetch(client):
             scores = await client.get_recent_scores()
@@ -321,7 +322,7 @@ class RecordsCog(commands.Cog):
             view = RecentScoresView(interaction.user.id, pages, details_by_idx)
             embeds, files = view.current_embeds_and_files()
 
-            message = await interaction.edit_original_response(embeds=embeds, view=view, attachments=files)
+            message = await interaction.edit_original_response(content=None, embeds=embeds, view=view, attachments=files)
             view.message = message
         except accounts.NotLinked:
             await interaction.edit_original_response(

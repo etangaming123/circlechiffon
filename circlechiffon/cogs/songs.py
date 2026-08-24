@@ -197,6 +197,7 @@ class SongsCog(commands.Cog):
         if not await access.handle_command_access(interaction, interaction.user.id, "cc-info", access.DEFAULT_COOLDOWN):
             return
         await interaction.response.defer()
+        await interaction.edit_original_response(content="Getting data...")
 
         try:
             catalog = get_catalog()
@@ -219,7 +220,7 @@ class SongsCog(commands.Cog):
                 embed.set_thumbnail(url=jacket_url(song.image_name))
 
             view = CheckScoreView(song)
-            view.message = await interaction.edit_original_response(embed=embed, view=view)
+            view.message = await interaction.edit_original_response(content=None, embed=embed, view=view)
         except Exception as e:
             await interaction.edit_original_response(
                 content=f"Couldn't look up that song: unexpected error ({type(e).__name__}: {e})"

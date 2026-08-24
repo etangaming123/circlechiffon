@@ -105,6 +105,7 @@ class CircleCog(commands.Cog):
         if not await access.handle_command_access(interaction, interaction.user.id, "cc-circle", access.MAIMAI_NET_COOLDOWN):
             return
         await interaction.response.defer()
+        await interaction.edit_original_response(content="Getting data...")
 
         async def fetch(client):
             circle = await client.get_circle()
@@ -125,7 +126,7 @@ class CircleCog(commands.Cog):
                 return
 
             view = CircleMembersView(interaction.user.id, circle, members)
-            message = await interaction.edit_original_response(embeds=view.embeds(), view=view)
+            message = await interaction.edit_original_response(content=None, embeds=view.embeds(), view=view)
             view.message = message
         except accounts.NotLinked:
             await interaction.edit_original_response(

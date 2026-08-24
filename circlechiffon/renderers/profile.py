@@ -102,10 +102,11 @@ def _paste_icon_centered(
         return 0
 
 
-def _draw_footer(image: Image.Image, draw: ImageDraw.ImageDraw, canvas_h: int) -> None:
+def _draw_footer(image: Image.Image, draw: ImageDraw.ImageDraw, canvas_h: int, canvas_w: int = CANVAS_WIDTH) -> None:
     footer_y = canvas_h - FOOTER_HEIGHT
-    draw.rectangle([(0, footer_y), (CANVAS_WIDTH, canvas_h)], fill=(0, 0, 0, 120))
-    draw.text((24, footer_y + 6), FOOTER_TEXT, font=FONT_FOOTER, fill=(200, 200, 205))
+    draw.rectangle([(0, footer_y), (canvas_w, canvas_h)], fill=(0, 0, 0, 120))
+    footer_text = _truncate_to_width(draw, FOOTER_TEXT, FONT_FOOTER, canvas_w - 48)
+    draw.text((24, footer_y + 6), footer_text, font=FONT_FOOTER, fill=(200, 200, 205))
 
 
 def _draw_title_capsule(
@@ -275,6 +276,11 @@ def render_profile_core(
     output.seek(0)
 
 
+# narrower than CANVAS_WIDTH on purpose: unlike render_profile_core's
+# side-by-side grid, this view's content is a single vertical column, so a
+# tall/thin canvas reads better than the shared 1500px-wide one.
+EXTRAS_CANVAS_WIDTH = 640
+
 _EXTRA_HEADER_H = 90
 _EXTRA_ICON_SIZE = 64
 _CP_SECTION_H = 90
@@ -368,7 +374,7 @@ def render_profile_extras(
         + _INTIMATE_H
         + FOOTER_HEIGHT
     )
-    image = Image.new("RGB", (CANVAS_WIDTH, canvas_h), BACKGROUND_COLOR)
+    image = Image.new("RGB", (EXTRAS_CANVAS_WIDTH, canvas_h), BACKGROUND_COLOR)
     draw = ImageDraw.Draw(image)
 
     pad = 24
@@ -392,7 +398,9 @@ def render_profile_extras(
     if not pasted_icon:
         placeholder = Image.new("RGB", (_EXTRA_ICON_SIZE, _EXTRA_ICON_SIZE), (200, 200, 205))
         image.paste(placeholder, (pad, icon_y), icon_mask)
-    draw.text((pad + _EXTRA_ICON_SIZE + 16, icon_y + 14), profile.display_name, font=FONT_HEADER_NAME, fill=(255, 255, 255))
+    name_x = pad + _EXTRA_ICON_SIZE + 16
+    name_text = _truncate_to_width(draw, profile.display_name, FONT_HEADER_NAME, EXTRAS_CANVAS_WIDTH - pad - name_x)
+    draw.text((name_x, icon_y + 14), name_text, font=FONT_HEADER_NAME, fill=(255, 255, 255))
     y += _EXTRA_HEADER_H
 
     # CP (class point) section - hand-drawn bar, no gauge/meter image asset
@@ -401,13 +409,13 @@ def render_profile_extras(
     cp_current, cp_required = extras.cp_current, extras.cp_required
     cp_text = f"{cp_current if cp_current is not None else '-'} / {cp_required if cp_required is not None else '-'} CP"
     cp_text_w = draw.textlength(cp_text, font=FONT_BODY)
-    draw.text((CANVAS_WIDTH - pad - cp_text_w, y + 10), cp_text, font=FONT_BODY, fill=(220, 220, 225))
+    draw.text((EXTRAS_CANVAS_WIDTH - pad - cp_text_w, y + 10), cp_text, font=FONT_BODY, fill=(220, 220, 225))
     bar_y = y + 44
     bar_h = 22
-    draw.rounded_rectangle([(pad, bar_y), (CANVAS_WIDTH - pad, bar_y + bar_h)], radius=bar_h // 2, fill=(50, 50, 62))
+    draw.rounded_rectangle([(pad, bar_y), (EXTRAS_CANVAS_WIDTH - pad, bar_y + bar_h)], radius=bar_h // 2, fill=(50, 50, 62))
     if cp_current is not None and cp_required:
         frac = max(0.0, min(1.0, cp_current / cp_required))
-        fill_w = round((CANVAS_WIDTH - pad * 2) * frac)
+        fill_w = round((EXTRAS_CANVAS_WIDTH - pad * 2) * frac)
         if fill_w > 0:
             draw.rounded_rectangle([(pad, bar_y), (pad + fill_w, bar_y + bar_h)], radius=bar_h // 2, fill=(64, 200, 255))
     y += _CP_SECTION_H
@@ -417,7 +425,7 @@ def render_profile_extras(
     draw.text((pad, y + 4), mile_text, font=FONT_MILE, fill=(255, 221, 51))
     if extras.mission_deadline_text:
         deadline_w = draw.textlength(extras.mission_deadline_text, font=FONT_BODY_SMALL)
-        draw.text((CANVAS_WIDTH - pad - deadline_w, y + 6), extras.mission_deadline_text, font=FONT_BODY_SMALL, fill=(180, 180, 190))
+        draw.text((EXTRAS_CANVAS_WIDTH - pad - deadline_w, y + 6), extras.mission_deadline_text, font=FONT_BODY_SMALL, fill=(180, 180, 190))
     if extras.mission_clear_count is not None and extras.mission_total_count is not None:
         clear_text = f"CLEAR {extras.mission_clear_count}/{extras.mission_total_count}"
         draw.text((pad, y + 28), clear_text, font=FONT_BODY_SMALL, fill=(140, 220, 140))
@@ -425,16 +433,16 @@ def render_profile_extras(
 
     for mission in extras.missions:
         row_color = (40, 60, 44) if mission.cleared else (38, 38, 48)
-        draw.rectangle([(pad, y + 2), (CANVAS_WIDTH - pad, y + _MISSION_ROW_H - 6)], fill=row_color, outline=(55, 55, 68))
+        draw.rectangle([(pad, y + 2), (EXTRAS_CANVAS_WIDTH - pad, y + _MISSION_ROW_H - 6)], fill=row_color, outline=(55, 55, 68))
         check = "✓" if mission.cleared else "○"
         draw.text((pad + 12, y + 12), check, font=FONT_BODY, fill=(140, 220, 140) if mission.cleared else (120, 120, 130))
         text = mission.text or "(no description)"
-        text = _truncate_to_width(draw, text, FONT_BODY_SMALL, CANVAS_WIDTH - pad * 2 - 150)
+        text = _truncate_to_width(draw, text, FONT_BODY_SMALL, EXTRAS_CANVAS_WIDTH - pad * 2 - 150)
         draw.text((pad + 40, y + 13), text, font=FONT_BODY_SMALL, fill=(220, 220, 225) if mission.cleared else (150, 150, 158))
         if mission.mile_reward is not None:
             reward_text = f"+{mission.mile_reward} maimille"
             reward_w = draw.textlength(reward_text, font=FONT_BODY_SMALL)
-            draw.text((CANVAS_WIDTH - pad - 12 - reward_w, y + 13), reward_text, font=FONT_BODY_SMALL, fill=(255, 221, 51))
+            draw.text((EXTRAS_CANVAS_WIDTH - pad - 12 - reward_w, y + 13), reward_text, font=FONT_BODY_SMALL, fill=(255, 221, 51))
         y += _MISSION_ROW_H
     y += _SECTION_GAP
 
@@ -458,7 +466,7 @@ def render_profile_extras(
     draw.text((pad, y), intimate_text, font=FONT_BODY, fill=(220, 220, 225))
     y += _INTIMATE_H
 
-    _draw_footer(image, draw, canvas_h)
+    _draw_footer(image, draw, canvas_h, EXTRAS_CANVAS_WIDTH)
     image.save(output, "PNG", compress_level=3)
     output.seek(0)
 
@@ -481,7 +489,7 @@ def render_profile_extras_template(output, *, mission_count: int = 5, ticket_cou
         + _INTIMATE_H
         + FOOTER_HEIGHT
     )
-    image = Image.new("RGBA", (CANVAS_WIDTH, canvas_h), (0, 0, 0, 0))
+    image = Image.new("RGBA", (EXTRAS_CANVAS_WIDTH, canvas_h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
 
     pad = 24
@@ -489,31 +497,31 @@ def render_profile_extras_template(output, *, mission_count: int = 5, ticket_cou
 
     icon_y = (_EXTRA_HEADER_H - _EXTRA_ICON_SIZE) // 2
     _draw_guide_box(draw, (pad, icon_y, pad + _EXTRA_ICON_SIZE, icon_y + _EXTRA_ICON_SIZE), "ICON", color=(0, 200, 255))
-    _draw_guide_box(draw, (pad + _EXTRA_ICON_SIZE + 16, 0, CANVAS_WIDTH - pad, _EXTRA_HEADER_H), "PLAYER NAME")
+    _draw_guide_box(draw, (pad + _EXTRA_ICON_SIZE + 16, 0, EXTRAS_CANVAS_WIDTH - pad, _EXTRA_HEADER_H), "PLAYER NAME")
     y += _EXTRA_HEADER_H
 
-    _draw_guide_box(draw, (pad, y, CANVAS_WIDTH - pad, y + _CP_SECTION_H), "CLASS POINT BAR + TEXT")
+    _draw_guide_box(draw, (pad, y, EXTRAS_CANVAS_WIDTH - pad, y + _CP_SECTION_H), "CLASS POINT BAR + TEXT")
     y += _CP_SECTION_H
 
-    _draw_guide_box(draw, (pad, y, CANVAS_WIDTH - pad, y + _MILE_HEADER_H), "MAIMILLE + MISSION DEADLINE/CLEAR COUNT")
+    _draw_guide_box(draw, (pad, y, EXTRAS_CANVAS_WIDTH - pad, y + _MILE_HEADER_H), "MAIMILLE + MISSION DEADLINE/CLEAR COUNT")
     y += _MILE_HEADER_H
 
     for i in range(mission_count):
-        _draw_guide_box(draw, (pad, y + 2, CANVAS_WIDTH - pad, y + _MISSION_ROW_H - 6), f"MISSION #{i + 1}", color=(0, 200, 255))
+        _draw_guide_box(draw, (pad, y + 2, EXTRAS_CANVAS_WIDTH - pad, y + _MISSION_ROW_H - 6), f"MISSION #{i + 1}", color=(0, 200, 255))
         y += _MISSION_ROW_H
     y += _SECTION_GAP
 
-    _draw_guide_box(draw, (pad, y, CANVAS_WIDTH - pad, y + _TICKETS_HEADER_H), "TICKETS HEADER")
+    _draw_guide_box(draw, (pad, y, EXTRAS_CANVAS_WIDTH - pad, y + _TICKETS_HEADER_H), "TICKETS HEADER")
     y += _TICKETS_HEADER_H
     for i in range(max(ticket_count, 1)):
-        _draw_guide_box(draw, (pad, y, CANVAS_WIDTH - pad, y + _TICKET_ROW_H - 4), f"TICKET #{i + 1}", color=(0, 200, 255))
+        _draw_guide_box(draw, (pad, y, EXTRAS_CANVAS_WIDTH - pad, y + _TICKET_ROW_H - 4), f"TICKET #{i + 1}", color=(0, 200, 255))
         y += _TICKET_ROW_H
     y += _SECTION_GAP
 
     _draw_guide_box(draw, (pad, y, pad + 300, y + _INTIMATE_H), "PRESENTS COUNT")
     y += _INTIMATE_H
 
-    _draw_guide_box(draw, (0, canvas_h - FOOTER_HEIGHT, CANVAS_WIDTH, canvas_h), "FOOTER")
+    _draw_guide_box(draw, (0, canvas_h - FOOTER_HEIGHT, EXTRAS_CANVAS_WIDTH, canvas_h), "FOOTER")
 
     image.save(output, "PNG", compress_level=3)
     output.seek(0)
