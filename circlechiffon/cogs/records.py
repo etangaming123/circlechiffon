@@ -340,9 +340,13 @@ class RecordsCog(commands.Cog):
             )
 
     @app_commands.command(name="cc-best", description="Render your best-50 maimai DX rating image (B15 + B35, like dxrating.net)")
+    @app_commands.describe(
+        next_update="Preview your B15 once the current version ages out of the B15 window "
+        "(only current-version charts count toward B15, like after the next update)"
+    )
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-    async def best(self, interaction: discord.Interaction):
+    async def best(self, interaction: discord.Interaction, next_update: bool = False):
         if not await access.handle_command_access(interaction, interaction.user.id, "cc-best", access.MAIMAI_NET_COOLDOWN):
             return
         start_time = time.monotonic()
@@ -383,7 +387,7 @@ class RecordsCog(commands.Cog):
                 return
 
             catalog = get_catalog()
-            result = calculate_best50(scores, catalog)
+            result = calculate_best50(scores, catalog, next_update_preview=next_update)
 
             entries = [e for e in (result.b15 + result.b35) if e is not None]
             if not entries:
@@ -406,13 +410,17 @@ class RecordsCog(commands.Cog):
             }
             badge_icons = await get_all_badge_icons()
 
-            # B15 eligibility window (see calculate_best50) is
+            # B15 eligibility window (see calculate_best50) is normally
             # {current_version, previous_version} - name it after the
             # actual two versions rather than a generic "current version"
             # label, so e.g. "CiRCLE PLUS and CiRCLE" instead of just
-            # "CURRENT VERSION".
-            b15_versions = [v for v in (catalog.current_version, catalog.previous_version) if v is not None]
-            b15_version_label = " and ".join(b15_versions) if b15_versions else "CURRENT VERSION"
+            # "CURRENT VERSION". In next_update preview mode the window
+            # narrows to just current_version, so label that distinctly.
+            if next_update:
+                b15_version_label = f"{catalog.current_version or 'CURRENT VERSION'} ONLY (next update preview)"
+            else:
+                b15_versions = [v for v in (catalog.current_version, catalog.previous_version) if v is not None]
+                b15_version_label = " and ".join(b15_versions) if b15_versions else "CURRENT VERSION"
 
             await interaction.edit_original_response(content="Rendering...")
             buf = io.BytesIO()
@@ -442,8 +450,13 @@ class RecordsCog(commands.Cog):
 
             elapsed = time.monotonic() - start_time
             timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+            preview_note = (
+                f"-# Preview: simulates next update (B15 = {catalog.current_version} only)\n" if next_update else ""
+            )
+            filename_suffix = "-preview" if next_update else ""
             await interaction.edit_original_response(
                 content=(
+                    f"{preview_note}"
                     f"Total rating: **{result.total_rating}** "
                     f"(New Charts: **{result.b15_total}**, Old Charts: **{result.b35_total}**)\n"
                     f"Average rating: Overall **{avg_overall:.2f}**, New **{avg_new:.2f}**, Old **{avg_old:.2f}**\n"
@@ -451,7 +464,7 @@ class RecordsCog(commands.Cog):
                     f"Old: **{floor_old if floor_old is not None else 'N/A'}**\n"
                     f"-# Rendered in `{elapsed:.2f}s`"
                 ),
-                attachments=[discord.File(buf, filename=f"best50-{profile.display_name}-{timestamp}.png")],
+                attachments=[discord.File(buf, filename=f"best50-{profile.display_name}-{timestamp}{filename_suffix}.png")],
             )
         except accounts.NotLinked:
             await interaction.edit_original_response(

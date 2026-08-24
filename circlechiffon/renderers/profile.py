@@ -436,7 +436,7 @@ def render_profile_extras(
         draw.rectangle([(pad, y + 2), (EXTRAS_CANVAS_WIDTH - pad, y + _MISSION_ROW_H - 6)], fill=row_color, outline=(55, 55, 68))
         check = "✓" if mission.cleared else "○"
         draw.text((pad + 12, y + 12), check, font=FONT_BODY, fill=(140, 220, 140) if mission.cleared else (120, 120, 130))
-        text = mission.text or "(no description)"
+        text = mission.text or "Complete previous mission to unlock!"
         text = _truncate_to_width(draw, text, FONT_BODY_SMALL, EXTRAS_CANVAS_WIDTH - pad * 2 - 150)
         draw.text((pad + 40, y + 13), text, font=FONT_BODY_SMALL, fill=(220, 220, 225) if mission.cleared else (150, 150, 158))
         if mission.mile_reward is not None:

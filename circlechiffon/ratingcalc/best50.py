@@ -36,8 +36,17 @@ class Best50Result:
         return self.b15_total + self.b35_total
 
 
-def calculate_best50(scores: list[Score], catalog: SongCatalog) -> Best50Result:
-    new_versions = {v for v in (catalog.current_version, catalog.previous_version) if v is not None}
+def calculate_best50(scores: list[Score], catalog: SongCatalog, *, next_update_preview: bool = False) -> Best50Result:
+    # next_update_preview simulates the current+previous B15 window
+    # narrowing to just current_version, as if previous_version had just
+    # aged out on the next game update - anything that drops out of the B15
+    # set below still gets bucketed into older_entries (B35) as usual,
+    # rather than being dropped, matching the real "ages out" mechanic. It
+    # can't predict actual unreleased charts since dxdata.json has none.
+    if next_update_preview:
+        new_versions = {v for v in (catalog.current_version,) if v is not None}
+    else:
+        new_versions = {v for v in (catalog.current_version, catalog.previous_version) if v is not None}
 
     current_entries: list[RatedEntry] = []
     older_entries: list[RatedEntry] = []

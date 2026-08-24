@@ -302,9 +302,13 @@ def _render_cell(
 
     diff_name = entry.sheet.difficulty.display_name if entry.sheet.difficulty else "?"
     type_name = entry.sheet.type.value.upper() if entry.sheet.type else "?"
+    level_text = entry.sheet.level or ""
+    if entry.sheet.internal_level_value is not None:
+        level_text = f"{level_text} [{entry.sheet.internal_level_value:.1f}]"
+    subtext = _truncate_to_width(draw, f"{diff_name} [{type_name}] {level_text}", FONT_SUBTEXT, text_max_width)
     draw.text(
         (text_x, card_pos[1] + 28),
-        f"{diff_name} [{type_name}] {entry.sheet.level or ''}",
+        subtext,
         font=FONT_SUBTEXT,
         fill=fg,
     )
