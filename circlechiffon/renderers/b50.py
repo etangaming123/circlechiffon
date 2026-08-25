@@ -272,6 +272,21 @@ def _render_cell(
         base.paste(card, card_pos, mask)
         return
 
+    is_no_chart = entry.score.achievement == 0
+
+    if is_no_chart:
+        # 0% achievement means this slot has no real play data (padding
+        # entry) - grey the whole card out and drop title/jacket rather
+        # than showing a difficulty-colored card with a fake-looking song.
+        card = Image.new("RGB", (CARD_WIDTH, CARD_HEIGHT), (40, 40, 50)).convert("RGBA")
+        mask = _rounded_mask((CARD_WIDTH, CARD_HEIGHT), 10)
+        base.paste(card, card_pos, mask)
+        draw = ImageDraw.Draw(base)
+        fg = (150, 150, 155)
+        text_x = card_pos[0] + 8
+        draw.text((text_x, card_pos[1] + 8), "No Chart", font=FONT_RATING, fill=fg)
+        return
+
     palette = _card_palette(entry.sheet.difficulty)
     card = _diagonal_gradient((CARD_WIDTH, CARD_HEIGHT), palette["bg1"], palette["bg2"]).convert("RGBA")
     mask = _rounded_mask((CARD_WIDTH, CARD_HEIGHT), 10)
@@ -311,15 +326,6 @@ def _render_cell(
         subtext,
         font=FONT_SUBTEXT,
         fill=fg,
-    )
-
-    is_no_chart = entry.score.achievement == 0
-    achievement_text = "No Chart" if is_no_chart else f"{entry.score.achievement:.4f}%"
-    draw.text(
-        (text_x, card_pos[1] + 46),
-        achievement_text,
-        font=FONT_RATING,
-        fill=(150, 150, 155) if is_no_chart else fg,
     )
 
     # icon row - shifted a few px further from the achievement % line
