@@ -23,6 +23,7 @@ from circlechiffon.adapters.maimai_net.parser import (
     parse_equipped_collection_image,
     parse_friend_detail,
     parse_friend_list,
+    parse_friend_list_page_count,
     parse_friend_scores,
     parse_music_records,
     parse_photos,
@@ -355,9 +356,33 @@ class MaimaiNetClient:
         """Confirmed live: /friend/ lists every friend as a profile-card row
         (same markup as Player's Data), each addressed by a hidden idx that
         every friend sub-page below needs. SEGA never shows this idx as a
-        user-facing "friend code" anywhere - it's purely an internal id."""
-        html = await self._get_page(urls.INTL["FRIEND_LIST_PAGE"])
-        return parse_friend_list(html)
+        user-facing "friend code" anywhere - it's purely an internal id.
+
+        The list paginates at 10/page - page 1 is fetched here directly,
+        and any remaining pages (confirmed live: stateless from URL params
+        alone, so all of them can be fetched concurrently rather than
+        crawled one at a time) via /friend/pages/?type=next&idx={page-1}."""
+        first_html = await self._get_page(urls.INTL["FRIEND_LIST_PAGE"])
+        entries = parse_friend_list(first_html)
+        page_count = parse_friend_list_page_count(first_html)
+        if page_count <= 1:
+            return entries
+
+        async def fetch_page(page: int) -> list[FriendEntry]:
+            url = f"{urls.INTL['FRIEND_LIST_PAGES_ENDPOINT']}?type=next&idx={page - 1}"
+            html = await self._get_page(url)
+            return parse_friend_list(html)
+
+        tasks = [asyncio.create_task(fetch_page(p)) for p in range(2, page_count + 1)]
+        try:
+            for task in tasks:
+                entries.extend(await task)
+        except BaseException:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
+        return entries
 
     async def get_friend_profile(self, idx: str) -> FriendEntry | None:
         """Confirmed live: /friend/friendDetail/?idx=... - same profile card

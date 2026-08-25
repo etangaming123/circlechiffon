@@ -473,17 +473,27 @@ def parse_profile(html: str) -> Profile:
         music_counts=music_counts,
     )
 
+# confirmed live: every friend row shares this exact class set regardless of
+# favorite status - img.friend_favorite_icon (the previous row anchor) only
+# exists on rows for friends marked as a SEGA "Favorite", so anchoring on it
+# silently dropped every non-favorited friend from the list.
+_FRIEND_ROW_CLASSES = {"see_through_block", "p_r", "m_15", "m_t_5", "p_10", "t_l", "f_0"}
+
+
 def parse_friend_list(html: str) -> list[FriendEntry]:
-    """Parses /friend/ (confirmed live this session). Each friend is a row
-    rooted at img.friend_favorite_icon's parent div, reusing the same
-    profile-card partial _extract_profile_fields already handles, plus a
-    hidden idx (the id every friend sub-page is addressed by - never shown
-    to the user anywhere on SEGA's own UI) and an optional comment."""
+    """Parses one page of /friend/ (confirmed live this session, including
+    against a non-favorited friend's row). Each friend is a row matching
+    _FRIEND_ROW_CLASSES, reusing the same profile-card partial
+    _extract_profile_fields already handles, plus a hidden idx (the id
+    every friend sub-page is addressed by - never shown to the user
+    anywhere on SEGA's own UI) and an optional comment. The friend list
+    paginates at 10/page - see parse_friend_list_page_count and
+    urls.FRIEND_LIST_PAGES_ENDPOINT for fetching the rest."""
     tree = LexborHTMLParser(html)
     entries: list[FriendEntry] = []
-    for icon in tree.css("img.friend_favorite_icon"):
-        row = icon.parent
-        if row is None:
+    for row in tree.css(".see_through_block"):
+        classes = set((row.attributes.get("class") or "").split())
+        if not _FRIEND_ROW_CLASSES.issubset(classes):
             continue
         idx_node = row.css_first("input[name=idx]")
         idx = idx_node.attributes.get("value") if idx_node is not None else None
@@ -493,6 +503,20 @@ def parse_friend_list(html: str) -> list[FriendEntry]:
         comment = comment_node.text(strip=True) if comment_node is not None else None
         entries.append(FriendEntry(profile=Profile(**_extract_profile_fields(row)), idx=idx, comment=comment or None))
     return entries
+
+
+def parse_friend_list_page_count(html: str) -> int:
+    """Confirmed live: the friend list's pager is a GET form at
+    /friend/pages/ - form[action*="/friend/pages/"] .d_ib.m_5.p_t_10.v_t
+    holds the total page count as plain text (e.g. "/5"). Defaults to 1 if
+    the pager isn't present at all (an account with a single page of
+    friends may not render one - unconfirmed, but "no pager" safely means
+    "nothing more to fetch" either way)."""
+    tree = LexborHTMLParser(html)
+    total_node = tree.css_first('form[action*="/friend/pages/"] .d_ib.m_5.p_t_10.v_t')
+    if total_node is None:
+        return 1
+    return _parse_int(total_node.text(strip=True)) or 1
 
 
 def parse_friend_detail(html: str, idx: str) -> FriendEntry | None:

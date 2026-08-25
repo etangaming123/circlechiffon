@@ -21,6 +21,10 @@ INTL = {
     "FRAME_PAGE": "https://maimaidx-eng.com/maimai-mobile/collection/frame/",
     "TOUR_MEMBER_PAGE": "https://maimaidx-eng.com/maimai-mobile/collection/character/",
     "FRIEND_LIST_PAGE": "https://maimaidx-eng.com/maimai-mobile/friend/",
+    # confirmed live: paginates at 10/page - caller appends
+    # "?type=next&idx={page-1}" to fetch `page` directly (stateless from URL
+    # params alone, no need to crawl pages sequentially).
+    "FRIEND_LIST_PAGES_ENDPOINT": "https://maimaidx-eng.com/maimai-mobile/friend/pages/",
     "FRIEND_DETAIL_PAGE": "https://maimaidx-eng.com/maimai-mobile/friend/friendDetail/",
     # confirmed live: scoreType=2 is the achievement view (scoreType=1 shows
     # a DX-star icon instead but never the raw DX score number - not useful
