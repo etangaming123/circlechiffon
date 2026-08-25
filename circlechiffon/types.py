@@ -230,3 +230,18 @@ class Circle:
     points_this_month: int | None = None
     rank_this_month: int | None = None
     members: list[CircleMember] = field(default_factory=list)
+
+
+@dataclass(slots=True, kw_only=True)
+class Photo:
+    """One entry from playerData/photo/ (the in-game "Album" feature) -
+    confirmed live this session: the site keeps only the 10 most recent
+    photos across the whole account, newest first, with no further
+    pagination of its own."""
+
+    image_url: str  # per-account - fetch via client.get_image_bytes
+    title: str | None = None
+    difficulty: Difficulty | None = None
+    chart_type: ChartType | None = None
+    played_at: datetime | None = None
+    venue: str | None = None
