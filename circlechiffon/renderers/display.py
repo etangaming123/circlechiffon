@@ -54,10 +54,10 @@ ROW_C_Y, ROW_C_H = 88, 25  # title, bottom row
 # Row B's inner split, measured off the reference render: the name field
 # and the dan badge share one 272-wide white box, with the badge fused
 # against the box's right edge.
-NAME_PAD_L, NAME_TEXT_W, NAME_BADGE_GAP, NAME_BADGE_W, NAME_PAD_R = 8, 168, 8, 80, 8
+NAME_PAD_L, NAME_TEXT_W, NAME_BADGE_GAP, NAME_BADGE_W, NAME_PAD_R = 4, 174, 6, 80, 8
 NAME_BOX_W = NAME_PAD_L + NAME_TEXT_W + NAME_BADGE_GAP + NAME_BADGE_W + NAME_PAD_R
 NAME_FONT_H = 32
-NAME_LETTER_GAP = 3  # extra px of pitch between characters, see _draw_monospaced_text
+NAME_LETTER_GAP = 3  # min px of clearance between adjacent glyphs' ink
 
 # img/trophy_<tier>.png's own pixel size on the live site - the title bar
 # is that asset at 1:1, not a scaled guess.
@@ -230,13 +230,16 @@ def _paste_circle_chip(base: Image.Image, draw: ImageDraw.ImageDraw, x: int, y: 
     vertical gradient lifted off the real card rather than filled flat,
     which is what made an earlier pass look pasted-on. The glyph inside
     it *was* traced off the card and lives in assets/display/."""
+    # <=< , not <=> : the left end points outward, but the right end is a
+    # notch cut *into* the chip, which is what the banner's own left point
+    # nests into.
     notch = h // 2
     poly = [
         (x, y + h // 2),
         (x + notch, y),
-        (x + w - notch, y),
-        (x + w, y + h // 2),
-        (x + w - notch, y + h),
+        (x + w, y),
+        (x + w - notch, y + h // 2),
+        (x + w, y + h),
         (x + notch, y + h),
     ]
     mask = Image.new("L", (w + 1, h + 1), 0)
@@ -267,34 +270,41 @@ def _draw_monospaced_text(
     font_h: int,
     letter_gap: int = 2,
 ) -> None:
-    """Lays `text` out on a fixed pitch - every character gets the same
-    cell, `letter_gap` px wider than the widest glyph, and is centred in
-    it. maimai names are stored full-width (e.g. 'ｈｖｌ．ＥＭＵ☆'), and
-    the card prints them on an even pitch like this rather than at the
-    font's natural proportional advances, so a proportional layout reads
-    visibly tighter and more cramped than the real thing.
+    """Lays `text` out on a fixed pitch - the box is divided into equal
+    cells, one per character, and each glyph is centred in its own cell.
+    maimai names are stored full-width (e.g. 'ｈｖｌ．ＥＭＵ☆') and the
+    card prints them evenly spaced like this; laying them out at the
+    font's natural advances reads visibly tighter and more cramped.
 
-    The font shrinks until the whole run fits `box_w`, so a long name
-    scales down instead of overflowing into the badge beside it."""
+    Glyph size is chosen by *height*, independently of the pitch. Tying
+    the two together (pitch = advance + gap) is what kept the name small:
+    a full-width advance is a whole em, so eight characters across 168px
+    forced an 18px font even though each glyph's ink only needs about
+    half that width. The size only drops if a glyph's actual ink would
+    crowd its neighbour, leaving `letter_gap` px of clearance."""
     if not text:
         return
+    cell = box_w / len(text)
     size = font_h
     while size > 6:
         font = ImageFont.truetype(font_path, size)
-        cell = max(draw.textlength(ch, font=font) for ch in text) + letter_gap
-        if cell * len(text) <= box_w:
+        widest = max(draw.textbbox((0, 0), ch, font=font)[2] - draw.textbbox((0, 0), ch, font=font)[0] for ch in text)
+        if widest <= cell - letter_gap:
             break
         size -= 1
     else:
         font = ImageFont.truetype(font_path, 6)
-        cell = max(draw.textlength(ch, font=font) for ch in text) + letter_gap
 
     bbox = draw.textbbox((0, 0), text, font=font)
     y = box_y + (box_h - (bbox[3] - bbox[1])) / 2 - bbox[1]
-    x = box_x
-    for ch in text:
-        draw.text((x + (cell - draw.textlength(ch, font=font)) / 2, y), ch, font=font, fill=fill)
-        x += cell
+    for i, ch in enumerate(text):
+        ink = draw.textbbox((0, 0), ch, font=font)
+        draw.text(
+            (box_x + cell * i + (cell - (ink[2] - ink[0])) / 2 - ink[0], y),
+            ch,
+            font=font,
+            fill=fill,
+        )
 
 
 def _draw_outlined_text(
