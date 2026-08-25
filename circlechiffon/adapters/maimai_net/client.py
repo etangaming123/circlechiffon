@@ -14,13 +14,17 @@ from circlechiffon.adapters.maimai_net.errors import (
     MaimaiNetError,
     SessionExpired,
     TotpRequired,
+    TransientNetError,
     UnexpectedResponse,
 )
 from circlechiffon.adapters.maimai_net.parser import (
+    is_error_page,
     is_maintenance,
+    is_transient_error,
     parse_circle,
     parse_circle_members,
     parse_equipped_collection_image,
+    parse_error_page,
     parse_friend_detail,
     parse_friend_list,
     parse_friend_list_page_count,
@@ -58,6 +62,12 @@ _COMMON_HEADERS = {
 
 # we don't want to get ip banned :(
 _RATE_LIMITER = AsyncLimiter(10, 1)
+
+# Backoff between _get_page retries of a transient DX NET error; one entry
+# per retry, so 2 entries = 3 attempts total. The last attempt reloads the
+# home page first (see _get_page) - the "back out and re-enter" a browser
+# user does by hand when DX NET tells them the connection time expired.
+_TRANSIENT_RETRY_DELAYS = (1.0, 2.0)
 
 
 class MaimaiNetClient:
@@ -194,7 +204,9 @@ class MaimaiNetClient:
         if is_maintenance(dest_text):
             raise MaintenanceError("maimai DX NET is currently under maintenance.")
 
-        if dest_resp.status_code == 302 and dest_resp.headers.get("location") in urls.ERROR_PAGES:
+        if dest_resp.is_redirect and urls.is_error_page_url(
+            dest_resp.url.join(dest_resp.headers.get("location") or "")
+        ):
             raise AimeCardUnavailable(
                 "SEGA ID authentication succeeded, but maimai DX NET did not provide a usable Aime card."
             )
@@ -207,18 +219,141 @@ class MaimaiNetClient:
         if is_maintenance(home_resp.text):
             raise MaintenanceError("maimai DX NET is currently under maintenance.")
 
-    async def _get_page(self, url: str) -> str:
+    async def _classify_error_page(self, error_url, html: str | None = None) -> MaimaiNetError:
+        """Decide *why* maimai DX NET sent us to its error page.
+
+        Everything used to be SessionExpired here, which is wrong for the
+        transient "Connection time has expired, please try again later" case:
+        the cookie is still good and a plain refresh gets past it, but the
+        user was told to /cc-login again (or a remember_password account
+        burned a full silent re-login) instead of the request just being
+        retried.
+
+        Costs one extra request - the error page body is where the code and
+        message live, and follow_redirects=False means a 302 only ever gave
+        us the Location header. Only paid on the error path.
+        """
+        if html is None:
+            try:
+                html = (await self._get(str(error_url))).text
+            except httpx.HTTPError:
+                # can't read the body, so we can't tell transient from
+                # expired - fall back to the old behavior rather than
+                # retrying something that may never succeed
+                return SessionExpired("Your maimai DX NET session has expired. Please /cc-login again.")
+
+        code, message = parse_error_page(html)
+        detail = " ".join(part for part in (f"(error code {code})" if code else None, message) if part)
+
+        # Confirmed live: 100001 / "Please login again" is what a stale or
+        # absent session cookie gets. That's a real expiry - raise it
+        # immediately so the /cc-login path (and with_client's silent
+        # re-login) stays as fast as it is today, with no retry delay.
+        if code in urls.SESSION_EXPIRED_ERROR_CODES or any(
+            marker in html for marker in urls.SESSION_EXPIRED_ERROR_STRINGS
+        ):
+            return SessionExpired("Your maimai DX NET session has expired. Please /cc-login again.")
+
+        if is_transient_error(html):
+            return TransientNetError(
+                "maimai DX NET is busy right now - please run that command again in a moment."
+                + (f" {detail}" if detail else ""),
+                code=code,
+                # 200002 means "this cookie isn't usable right now", which a
+                # wedged-but-live session recovers from and a dead one never
+                # does. Retry either way; _get_page decides which it was.
+                session_suspect=code in urls.SESSION_SUSPECT_ERROR_CODES,
+            )
+
+        # Unrecognized code. Retry it: an unknown error page is far more
+        # likely to be another transient hiccup than a permanent failure
+        # (the one permanent case we know of, 100001, is handled above), and
+        # three attempts costs ~3s. SEGA's own wording is carried through so
+        # an unknown code is identifiable from the message the user sees -
+        # the adapter has no logging to report it any other way.
+        return TransientNetError(
+            f"maimai DX NET returned an error{(' ' + detail) if detail else ''}.",
+            code=code,
+        )
+
+    async def _fetch_page(self, url: str) -> str:
+        """One attempt at fetching an authenticated page. Raises
+        TransientNetError for anything _get_page should retry."""
         resp = await self._get(url)
         text = resp.text
 
         if is_maintenance(text):
             raise MaintenanceError("maimai DX NET is currently under maintenance.")
-        if resp.status_code == 302 and resp.headers.get("location") in urls.ERROR_PAGES:
-            raise SessionExpired("Your maimai DX NET session has expired. Please /cc-login again.")
-        if resp.status_code == 302 and "common_auth" in (resp.headers.get("location") or ""):
-            raise SessionExpired("Your maimai DX NET session has expired. Please /cc-login again.")
+
+        if resp.is_redirect:
+            # resolve first: the raw header may be relative, and matching it
+            # by exact string (as this used to) missed every variant, which
+            # doesn't raise - it returns the empty 302 body to a parser that
+            # never raises, so the command silently comes back empty.
+            location = resp.url.join(resp.headers.get("location") or "")
+            if urls.is_error_page_url(location):
+                raise await self._classify_error_page(location)
+            if "common_auth" in str(location):
+                raise SessionExpired("Your maimai DX NET session has expired. Please /cc-login again.")
+            # confirmed live: a request with no session cookie at all lands
+            # here, not on /error/
+            if urls.is_landing_page_url(location):
+                raise SessionExpired("Your maimai DX NET session has expired. Please /cc-login again.")
+
+        # the error page is served as a 200, so it never showed up in the
+        # redirect checks above and flowed straight into the parsers
+        if is_error_page(text):
+            raise await self._classify_error_page(url, html=text)
 
         return text
+
+    async def _get_page(self, url: str) -> str:
+        """Fetch an authenticated page, retrying the transient DX NET errors
+        that a browser user gets past by refreshing.
+
+        Only TransientNetError is retried - SessionExpired and
+        MaintenanceError propagate on the first attempt exactly as before, so
+        no latency is added to either of those paths."""
+        last: TransientNetError | None = None
+
+        for attempt in range(len(_TRANSIENT_RETRY_DELAYS) + 1):
+            if attempt:
+                await asyncio.sleep(_TRANSIENT_RETRY_DELAYS[attempt - 1])
+                if attempt == len(_TRANSIENT_RETRY_DELAYS):
+                    # final attempt: reload home first to shake loose
+                    # whatever per-session page state DX NET wedged on.
+                    # Best-effort - a failure here must not mask `last`.
+                    try:
+                        home_resp = await self._get(urls.INTL["HOME_PAGE"])
+                    except (httpx.HTTPError, MaimaiNetError):
+                        pass
+                    else:
+                        # Home bouncing us out is unambiguous in a way 200002
+                        # is not: the session is gone, not wedged. Confirmed
+                        # live against a genuinely dead cookie, where /home/
+                        # 302s to the bare landing page. Stop here rather
+                        # than spending a final attempt that cannot succeed.
+                        if home_resp.is_redirect:
+                            location = home_resp.url.join(home_resp.headers.get("location") or "")
+                            if urls.is_landing_page_url(location) or "common_auth" in str(location):
+                                raise SessionExpired(
+                                    "Your maimai DX NET session has expired. Please /cc-login again."
+                                ) from last
+            try:
+                return await self._fetch_page(url)
+            except TransientNetError as e:
+                last = e
+
+        assert last is not None
+        if last.session_suspect:
+            # never cleared, so treat it as a dead session after all - this
+            # is what routes a genuinely expired cookie to with_client's
+            # silent re-login (or the /cc-login message) instead of leaving
+            # the user with a "busy, try again" that would never come right.
+            raise SessionExpired(
+                "Your maimai DX NET session has expired. Please /cc-login again."
+            ) from last
+        raise last
 
     async def get_profile_page_html(self) -> str:
         # Player's Data page, not home - same header markup (name/rating/

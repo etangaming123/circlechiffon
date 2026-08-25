@@ -1,6 +1,8 @@
 import asyncio
+import difflib
 import io
 import time
+import unicodedata
 from datetime import datetime, timezone
 
 import discord
@@ -26,13 +28,25 @@ _NOT_FAVORITED_HINT = (
 )
 
 
+def _normalize_name(text: str) -> str:
+    """NFKC-folds fullwidth/halfwidth/compatibility variants (e.g. fullwidth
+    Ａ-Ｚ, halfwidth katakana, circled digits) down to their plain form, then
+    casefolds. maimai display names commonly use these instead of anything
+    typable on a standard keyboard, so a naive substring match against the
+    raw text misses almost everything - this makes "ethan" match "Ｅｔｈａｎ"
+    or "ｲｰｻﾝ"-style halfwidth katakana the same as their generic spelling."""
+    return unicodedata.normalize("NFKC", text).casefold().strip()
+
+
 async def _resolve_friend_entry(client, query: str) -> FriendEntry | list[FriendEntry] | None:
     """Looks up one friend by (in order): exact idx - the hidden id every
     friend sub-page uses, digits-only so a query that's all digits is tried
-    here first - falling back to a case-insensitive substring match on
-    display name against the full friend list. Returns a single FriendEntry
-    on a clean match, a list on an ambiguous name match, or None on no
-    match at all."""
+    here first - then a normalized substring match on display name, falling
+    back to fuzzy close-matching (via difflib) if no substring match hits at
+    all, so a typo or an unnormalizable decorative name still surfaces
+    candidates. Returns a single FriendEntry on a clean match, a list of
+    candidates on an ambiguous/fuzzy match (for the caller to offer as a
+    dropdown), or None on no match at all."""
     query = query.strip()
     if not query:
         return None
@@ -41,18 +55,19 @@ async def _resolve_friend_entry(client, query: str) -> FriendEntry | list[Friend
         if entry is not None:
             return entry
     entries = await client.get_friend_list()
-    matches = [e for e in entries if query.lower() in e.profile.display_name.lower()]
+    norm_query = _normalize_name(query)
+    norm_names = [_normalize_name(e.profile.display_name) for e in entries]
+
+    matches = [e for e, n in zip(entries, norm_names) if norm_query in n]
+    if not matches:
+        close = set(difflib.get_close_matches(norm_query, norm_names, n=25, cutoff=0.5))
+        matches = [e for e, n in zip(entries, norm_names) if n in close]
+
     if len(matches) == 1:
         return matches[0]
     if not matches:
         return None
     return matches
-
-
-def _ambiguous_message(matches: list[FriendEntry]) -> str:
-    names = ", ".join(e.profile.display_name for e in matches[:10])
-    more = f" (+{len(matches) - 10} more)" if len(matches) > 10 else ""
-    return f"Multiple friends match that: {names}{more}. Be more specific, or use `/cc-friends show_ids:True` to get an exact id."
 
 
 def _friends_list_embed(entries: list[FriendEntry], show_ids: bool, page: int, page_count: int) -> discord.Embed:
@@ -125,6 +140,67 @@ class FriendsListView(discord.ui.View):
                 pass
 
 
+class FriendPickView(discord.ui.View):
+    """Shown when a name search matches more than one friend (substring or
+    fuzzy). `on_pick` is called with the *component* interaction (not the
+    original slash-command one) and the chosen FriendEntry once the user
+    picks from the dropdown - the caller is responsible for responding to
+    that interaction itself (it hasn't been responded to when on_pick runs)."""
+
+    def __init__(self, invoker_id: int, matches: list[FriendEntry], on_pick):
+        super().__init__(timeout=60)
+        self.invoker_id = invoker_id
+        self.on_pick = on_pick
+        self.message: discord.InteractionMessage | None = None
+        # Discord caps a select at 25 options - matches beyond that just
+        # aren't offered; the prompt text tells the user to narrow instead.
+        self.shown = matches[:25]
+
+        options = [
+            discord.SelectOption(
+                label=e.profile.display_name[:100],
+                value=e.idx,
+                description=f"Rating: {e.profile.rating}" if e.profile.rating is not None else None,
+            )
+            for e in self.shown
+        ]
+        select = discord.ui.Select(placeholder="Select a friend...", options=options)
+        select.callback = self._on_select
+        self.add_item(select)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.invoker_id:
+            await interaction.response.send_message(
+                "Only the person who ran this command can pick.", ephemeral=True
+            )
+            return False
+        return True
+
+    async def _on_select(self, interaction: discord.Interaction):
+        idx = interaction.data["values"][0]
+        entry = next((e for e in self.shown if e.idx == idx), None)
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(content="Getting data...", embed=None, view=self)
+        if entry is not None:
+            await self.on_pick(interaction, entry)
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+        if self.message is not None:
+            try:
+                await self.message.edit(view=self)
+            except discord.HTTPException:
+                pass
+
+
+def _pick_prompt(matches: list[FriendEntry]) -> str:
+    if len(matches) > 25:
+        return f"{len(matches)} friends match that - showing the first 25. Narrow your search for the rest, or pick below:"
+    return "Multiple friends match that - pick one:"
+
+
 class FriendsCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -180,25 +256,49 @@ class FriendsCog(commands.Cog):
         await interaction.edit_original_response(content="Getting data...")
 
         async def fetch(client):
-            resolved = await _resolve_friend_entry(client, friend)
-            if not isinstance(resolved, FriendEntry):
-                return resolved, None
-            icon_bytes = await client.get_image_bytes(resolved.profile.icon_url) if resolved.profile.icon_url else None
-            return resolved, icon_bytes
+            return await _resolve_friend_entry(client, friend)
 
         try:
-            resolved, icon_bytes = await accounts.with_client(
+            resolved = await accounts.with_client(
                 interaction.user.id, fetch, on_retry=accounts.default_retry_notice(interaction)
             )
-
             if resolved is None:
                 await interaction.edit_original_response(content=f"No friend found matching `{friend}`.")
                 return
             if isinstance(resolved, list):
-                await interaction.edit_original_response(content=_ambiguous_message(resolved))
+                view = FriendPickView(interaction.user.id, resolved, self._send_friend_profile)
+                await interaction.edit_original_response(content=_pick_prompt(resolved), view=view)
+                view.message = await interaction.original_response()
                 return
+            await self._send_friend_profile(interaction, resolved)
+        except accounts.NotLinked:
+            await interaction.edit_original_response(
+                content="You haven't linked a maimai DX NET account yet. Run `/cc-login` first."
+            )
+        except SessionExpired as e:
+            await interaction.edit_original_response(content=str(e))
+        except MaimaiNetError as e:
+            await interaction.edit_original_response(content=f"Couldn't fetch that friend's profile: {e}")
+        except Exception as e:
+            await interaction.edit_original_response(
+                content=f"Couldn't fetch that friend's profile: unexpected error ({type(e).__name__}: {e})"
+            )
 
-            entry = resolved
+    async def _send_friend_profile(self, interaction: discord.Interaction, entry: FriendEntry):
+        """Fetches the icon and edits `interaction`'s response with the
+        profile embed. Works from either the original slash-command
+        interaction (already deferred) or a FriendPickView select callback
+        (already responded to via edit_message) - both support
+        edit_original_response against the same underlying message."""
+
+        async def fetch(client):
+            return await client.get_image_bytes(entry.profile.icon_url) if entry.profile.icon_url else None
+
+        try:
+            icon_bytes = await accounts.with_client(
+                interaction.user.id, fetch, on_retry=accounts.default_retry_notice(interaction)
+            )
+
             profile = entry.profile
             embed = discord.Embed(title=profile.display_name, color=embed_colors.INFO)
             embed.add_field(name="Rating", value=str(profile.rating) if profile.rating is not None else "?", inline=True)
@@ -219,18 +319,18 @@ class FriendsCog(commands.Cog):
                 files.append(discord.File(io.BytesIO(icon_bytes), filename="icon.png"))
                 embed.set_thumbnail(url="attachment://icon.png")
 
-            await interaction.edit_original_response(content=None, embed=embed, attachments=files)
+            await interaction.edit_original_response(content=None, embed=embed, view=None, attachments=files)
         except accounts.NotLinked:
             await interaction.edit_original_response(
-                content="You haven't linked a maimai DX NET account yet. Run `/cc-login` first."
+                content="You haven't linked a maimai DX NET account yet. Run `/cc-login` first.", view=None
             )
         except SessionExpired as e:
-            await interaction.edit_original_response(content=str(e))
+            await interaction.edit_original_response(content=str(e), view=None)
         except MaimaiNetError as e:
-            await interaction.edit_original_response(content=f"Couldn't fetch that friend's profile: {e}")
+            await interaction.edit_original_response(content=f"Couldn't fetch that friend's profile: {e}", view=None)
         except Exception as e:
             await interaction.edit_original_response(
-                content=f"Couldn't fetch that friend's profile: unexpected error ({type(e).__name__}: {e})"
+                content=f"Couldn't fetch that friend's profile: unexpected error ({type(e).__name__}: {e})", view=None
             )
 
     @app_commands.command(
@@ -245,15 +345,46 @@ class FriendsCog(commands.Cog):
             interaction, interaction.user.id, "cc-friend-best", access.MAIMAI_NET_COOLDOWN
         ):
             return
-        start_time = time.monotonic()
         await interaction.response.defer()
         await interaction.edit_original_response(content="Resolving friend...")
 
         async def fetch(client):
-            resolved = await _resolve_friend_entry(client, friend)
-            if not isinstance(resolved, FriendEntry):
-                return resolved, [], None
+            return await _resolve_friend_entry(client, friend)
 
+        try:
+            resolved = await accounts.with_client(
+                interaction.user.id, fetch, on_retry=accounts.default_retry_notice(interaction)
+            )
+            if resolved is None:
+                await interaction.edit_original_response(content=f"No friend found matching `{friend}`.")
+                return
+            if isinstance(resolved, list):
+                view = FriendPickView(interaction.user.id, resolved, self._render_friend_best)
+                await interaction.edit_original_response(content=_pick_prompt(resolved), view=view)
+                view.message = await interaction.original_response()
+                return
+            await self._render_friend_best(interaction, resolved)
+        except accounts.NotLinked:
+            await interaction.edit_original_response(
+                content="You haven't linked a maimai DX NET account yet. Run `/cc-login` first."
+            )
+        except SessionExpired as e:
+            await interaction.edit_original_response(content=str(e))
+        except MaimaiNetError as e:
+            await interaction.edit_original_response(content=f"Couldn't fetch that friend's scores: {e}")
+        except Exception as e:
+            await interaction.edit_original_response(
+                content=f"Couldn't render that friend's best-50: unexpected error ({type(e).__name__}: {e})"
+            )
+
+    async def _render_friend_best(self, interaction: discord.Interaction, entry: FriendEntry):
+        """Fetches scores + renders the best-50 image, editing `interaction`'s
+        response throughout. Works from either the original slash-command
+        interaction (already deferred) or a FriendPickView select callback
+        (already responded to via edit_message)."""
+        start_time = time.monotonic()
+
+        async def fetch(client):
             display_order = ["Re:MASTER", "MASTER", "EXPERT", "ADVANCED", "BASIC"]
             done: set[str] = set()
 
@@ -263,29 +394,19 @@ class FriendsCog(commands.Cog):
                     f"Fetching {label} Charts... ✅" if label in done else f"Fetching {label} Charts..."
                     for label in display_order
                 ]
-                await interaction.edit_original_response(content="\n".join(lines))
+                await interaction.edit_original_response(content="\n".join(lines), view=None)
 
-            scores = await client.get_friend_scores(resolved.idx, on_progress=report_progress)
-            icon_bytes = (
-                await client.get_image_bytes(resolved.profile.icon_url) if resolved.profile.icon_url else None
-            )
-            return resolved, scores, icon_bytes
+            scores = await client.get_friend_scores(entry.idx, on_progress=report_progress)
+            icon_bytes = await client.get_image_bytes(entry.profile.icon_url) if entry.profile.icon_url else None
+            return scores, icon_bytes
 
         try:
-            resolved, scores, icon_bytes = await accounts.with_client(
+            scores, icon_bytes = await accounts.with_client(
                 interaction.user.id, fetch, on_retry=accounts.default_retry_notice(interaction)
             )
 
-            if resolved is None:
-                await interaction.edit_original_response(content=f"No friend found matching `{friend}`.")
-                return
-            if isinstance(resolved, list):
-                await interaction.edit_original_response(content=_ambiguous_message(resolved))
-                return
-
-            entry = resolved
             if not scores:
-                await interaction.edit_original_response(content=_NOT_FAVORITED_HINT)
+                await interaction.edit_original_response(content=_NOT_FAVORITED_HINT, view=None)
                 return
 
             catalog = get_catalog()
@@ -294,7 +415,8 @@ class FriendsCog(commands.Cog):
             entries = [e for e in (result.b15 + result.b35) if e is not None]
             if not entries:
                 await interaction.edit_original_response(
-                    content="Fetched this friend's scores, but couldn't match any of them to the song catalog to compute a rating."
+                    content="Fetched this friend's scores, but couldn't match any of them to the song catalog to compute a rating.",
+                    view=None,
                 )
                 return
 
@@ -315,7 +437,7 @@ class FriendsCog(commands.Cog):
             b15_versions = [v for v in (catalog.current_version, catalog.previous_version) if v is not None]
             b15_version_label = " and ".join(b15_versions) if b15_versions else "CURRENT VERSION"
 
-            await interaction.edit_original_response(content="Rendering...")
+            await interaction.edit_original_response(content="Rendering...", view=None)
             buf = io.BytesIO()
             await asyncio.to_thread(
                 render_b50,
@@ -341,18 +463,19 @@ class FriendsCog(commands.Cog):
                     f"-# Rendered in `{elapsed:.2f}s`"
                 ),
                 attachments=[discord.File(buf, filename=f"friend-best50-{entry.profile.display_name}-{timestamp}.png")],
+                view=None,
             )
         except accounts.NotLinked:
             await interaction.edit_original_response(
-                content="You haven't linked a maimai DX NET account yet. Run `/cc-login` first."
+                content="You haven't linked a maimai DX NET account yet. Run `/cc-login` first.", view=None
             )
         except SessionExpired as e:
-            await interaction.edit_original_response(content=str(e))
+            await interaction.edit_original_response(content=str(e), view=None)
         except MaimaiNetError as e:
-            await interaction.edit_original_response(content=f"Couldn't fetch that friend's scores: {e}")
+            await interaction.edit_original_response(content=f"Couldn't fetch that friend's scores: {e}", view=None)
         except Exception as e:
             await interaction.edit_original_response(
-                content=f"Couldn't render that friend's best-50: unexpected error ({type(e).__name__}: {e})"
+                content=f"Couldn't render that friend's best-50: unexpected error ({type(e).__name__}: {e})", view=None
             )
 
 
