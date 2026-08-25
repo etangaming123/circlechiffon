@@ -916,3 +916,63 @@ def is_maintenance(html: str) -> bool:
     from circlechiffon.adapters.maimai_net.urls import MAINTENANCE_STRINGS
 
     return any(marker in html for marker in MAINTENANCE_STRINGS)
+
+
+def is_error_page(html: str) -> bool:
+    """True if `html` is maimai DX NET's error page body.
+
+    Needed because that page is served with status **200**, not as a redirect
+    (confirmed live) - so without this check it flows straight into the
+    parsers above, none of which raise, and the command silently returns an
+    empty list instead of an error."""
+    from circlechiffon.adapters.maimai_net.urls import ERROR_PAGE_MARKERS
+
+    return any(marker in html for marker in ERROR_PAGE_MARKERS)
+
+
+def parse_error_page(html: str) -> tuple[str | None, str | None]:
+    """Pulls (code, message) out of the error page. Confirmed live markup:
+
+        <div class="p_5 f_14 ">ERROR CODE：100001</div>
+        <div class="p_5 f_12 gray break">An error occured. <br>Please login again.</div>
+
+    Note the full-width colon SEGA actually uses. Deliberately tolerant -
+    falls back to a regex over the page text if those classes ever move, and
+    returns (None, None) rather than raising, since the caller's job is to
+    classify an error that has *already* happened."""
+    tree = LexborHTMLParser(html)
+
+    code = None
+    code_node = tree.css_first(".p_5.f_14")
+    if code_node is not None:
+        match = re.search(r"ERROR\s*CODE\s*[:：]\s*(\w+)", code_node.text())
+        if match:
+            code = match.group(1)
+    if code is None:
+        match = re.search(r"ERROR\s*CODE\s*[:：]\s*(\w+)", tree.body.text() if tree.body else html)
+        if match:
+            code = match.group(1)
+
+    message = None
+    message_node = tree.css_first(".p_5.f_12.gray.break")
+    if message_node is not None:
+        # the <br> between the two sentences collapses to nothing without a
+        # separator, giving "An error occured.Please login again."
+        message = re.sub(r"\s+", " ", message_node.text(separator=" ")).strip() or None
+
+    return code, message
+
+
+def is_transient_error(html: str) -> bool:
+    """True if the error page describes something that clears on a retry
+    (e.g. "Connection time has expired, please try again later") rather than
+    a genuine session expiry. A page that says to log in again is never
+    transient, so that check wins over the transient markers."""
+    from circlechiffon.adapters.maimai_net.urls import (
+        SESSION_EXPIRED_ERROR_STRINGS,
+        TRANSIENT_ERROR_STRINGS,
+    )
+
+    if any(marker in html for marker in SESSION_EXPIRED_ERROR_STRINGS):
+        return False
+    return any(marker in html for marker in TRANSIENT_ERROR_STRINGS)
