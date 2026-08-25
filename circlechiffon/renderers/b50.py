@@ -328,6 +328,9 @@ def _render_cell(
         fill=fg,
     )
 
+    achievement_text = f"{entry.score.achievement:.4f}%"
+    draw.text((text_x, card_pos[1] + 46), achievement_text, font=FONT_RATING, fill=fg)
+
     # icon row - shifted a few px further from the achievement % line
     # above it (was flush at +62, only ~2px clearance from that text)
     icon_x = text_x
