@@ -422,7 +422,8 @@ def render_b50(
         draw.text((stat_x + (block_w - value_w) / 2, 46), value_text, font=FONT_HEADER_STAT_VALUE, fill=(255, 255, 255))
         draw.text((stat_x + (block_w - label_w) / 2, 86), label, font=FONT_HEADER_STAT_LABEL, fill=(180, 180, 190))
 
-    icon_mask = _rounded_mask((icon_size, icon_size), icon_size // 2)
+    # slight round, not a full circle - same convention as /cc-display's icon.
+    icon_mask = _rounded_mask((icon_size, icon_size), 10)
     pasted_icon = False
     if icon_bytes:
         try:

@@ -204,7 +204,8 @@ def render_profile_core(
     right_edge = CORE_CANVAS_WIDTH - pad
 
     icon_x, icon_y = pad, pad
-    icon_mask = _rounded_mask((ICON_SIZE, ICON_SIZE), ICON_SIZE // 2)
+    # slight round, not a full circle - same convention as /cc-display's icon.
+    icon_mask = _rounded_mask((ICON_SIZE, ICON_SIZE), 10)
     pasted_icon = False
     if icon_bytes:
         try:
@@ -239,8 +240,10 @@ def render_profile_core(
     draw.text((content_x, icon_y), name, font=FONT_HEADER_NAME, fill=(255, 255, 255))
 
     # title capsule, below the name - still within the icon's height so it
-    # doesn't collide with the rating/rank/star row underneath.
-    capsule_y = icon_y + 34
+    # doesn't collide with the rating/rank/star row underneath. FONT_HEADER_NAME
+    # is 34pt with real ink extending to ~47px below its anchor, so the capsule
+    # needs more clearance than the font's point size alone suggests.
+    capsule_y = icon_y + 50
     capsule_w = min(300, right_edge - content_x)
     _draw_title_capsule(image, draw, profile.title, profile.title_tier, (content_x, capsule_y), capsule_w, 30)
 
@@ -344,7 +347,7 @@ def render_profile_core_template(output) -> None:
 
     _draw_guide_box(draw, (content_x, icon_y, stat_x - 12, icon_y + 30), "PLAYER NAME")
 
-    capsule_y = icon_y + 34
+    capsule_y = icon_y + 50
     _draw_guide_box(draw, (content_x, capsule_y, content_x + 300, capsule_y + 30), "TITLE CAPSULE")
 
     row_y = icon_y + ICON_SIZE + 10
@@ -404,7 +407,8 @@ def render_profile_extras(
 
     # header: icon + name only - no rating/title/ranks, this view is fully
     # separate from the core stats view.
-    icon_mask = _rounded_mask((_EXTRA_ICON_SIZE, _EXTRA_ICON_SIZE), _EXTRA_ICON_SIZE // 2)
+    # slight round, not a full circle - same convention as /cc-display's icon.
+    icon_mask = _rounded_mask((_EXTRA_ICON_SIZE, _EXTRA_ICON_SIZE), 10)
     icon_y = (_EXTRA_HEADER_H - _EXTRA_ICON_SIZE) // 2
     pasted_icon = False
     if icon_bytes:
