@@ -1,7 +1,7 @@
 import io
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 from circlechiffon.renderers.b50 import (
     FONT_DIR,
@@ -18,6 +18,9 @@ from circlechiffon.types import Circle, Profile
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent.parent / "assets"
 FALLBACK_TEMPLATE_PATH = ASSETS_DIR / "b50" / "template.png"
+# traced off the reference card - the group glyph on the circle banner's
+# blue tab, which SEGA doesn't serve as a file anywhere.
+CHIP_ICON_PATH = ASSETS_DIR / "display" / "circle_chip_icon.png"
 
 _JP_BOLD = str(FONT_DIR / "NotoSansJP-Bold.ttf")
 _JP_MEDIUM = str(FONT_DIR / "NotoSansJP-Medium.ttf")
@@ -50,11 +53,11 @@ ROW_C_Y, ROW_C_H = 88, 25  # title, bottom row
 
 # Row B's inner split, measured off the reference render: the name field
 # and the dan badge share one 272-wide white box, with the badge fused
-# against the box's right edge. Padding is asymmetric (14 left / 8 right)
-# because that's where the reference actually puts the text.
-NAME_PAD_L, NAME_TEXT_W, NAME_BADGE_GAP, NAME_BADGE_W, NAME_PAD_R = 12, 164, 8, 80, 8
+# against the box's right edge.
+NAME_PAD_L, NAME_TEXT_W, NAME_BADGE_GAP, NAME_BADGE_W, NAME_PAD_R = 8, 168, 8, 80, 8
 NAME_BOX_W = NAME_PAD_L + NAME_TEXT_W + NAME_BADGE_GAP + NAME_BADGE_W + NAME_PAD_R
 NAME_FONT_H = 32
+NAME_LETTER_GAP = 3  # extra px of pitch between characters, see _draw_monospaced_text
 
 # img/trophy_<tier>.png's own pixel size on the live site - the title bar
 # is that asset at 1:1, not a scaled guess.
@@ -72,7 +75,15 @@ RIBBON_X_OFFSET = -9  # relative to CONTENT_X
 RIBBON_Y_OVERLAP = 2  # how far it rides up over the nameplate's bottom edge
 RIBBON_CHIP_W = 50
 RIBBON_CHIP_OVERLAP = 8  # how far the banner tucks in behind the chip
-CIRCLE_CHIP_COLOR = (44, 109, 215)
+# sampled down the real chip: bright at the top, a darker band across the
+# middle, then a highlight below it - the glossy-bar shading that a flat
+# fill loses.
+CHIP_GRADIENT = [
+    (0.00, (42, 100, 212)),
+    (0.45, (42, 83, 185)),
+    (0.55, (76, 124, 214)),
+    (1.00, (45, 109, 215)),
+]
 
 BACKGROUND_COLOR = (24, 24, 32)
 
@@ -167,45 +178,6 @@ def _paste_contain_left(
         return 0
 
 
-def _draw_tracked_text(
-    image: Image.Image,
-    draw: ImageDraw.ImageDraw,
-    text: str,
-    font_path: str,
-    box_x: int,
-    box_y: int,
-    box_w: int,
-    box_h: int,
-    fill: tuple[int, int, int],
-    center: bool = False,
-    min_tracking: float = 0.68,
-    font_h: int | None = None,
-) -> None:
-    """Draws `text` sized to fit font_h (defaults to box_h), pulling
-    letters closer together (reduced tracking between glyphs, like
-    negative letter-spacing) if the natural width overflows box_w -
-    unlike a horizontal resize, each glyph keeps its own proportions,
-    it's just packed tighter. Vertically centered within the full box_h
-    even when font_h is smaller (e.g. a title bar taller than the text
-    should actually render at). Only truncates as a last resort, if even
-    the tightest tracking isn't enough."""
-    if not text:
-        return
-    font = _fit_font(draw, text, font_path, 10_000, font_h if font_h is not None else box_h)
-    natural_w = draw.textlength(text, font=font)
-    tracking = min(1.0, box_w / natural_w) if natural_w > 0 else 1.0
-    tracking = max(tracking, min_tracking)
-    while text and draw.textlength(text, font=font) * tracking > box_w:
-        text = text[:-1]
-    bbox = draw.textbbox((0, 0), text, font=font)
-    text_h = bbox[3] - bbox[1]
-    total_w = draw.textlength(text, font=font) * tracking
-    x = box_x + (box_w - total_w) / 2 if center else box_x
-    y = box_y + (box_h - text_h) / 2 - bbox[1]
-    for ch in text:
-        draw.text((x, y), ch, font=font, fill=fill)
-        x += draw.textlength(ch, font=font) * tracking
-
 
 def _paste_plate(base: Image.Image, plate_bytes: bytes | None, pos: tuple[int, int], size: tuple[int, int]) -> bool:
     """Pastes a UI plate asset (the trophy/title banner, the circle's name
@@ -226,12 +198,38 @@ def _paste_plate(base: Image.Image, plate_bytes: bytes | None, pos: tuple[int, i
         return False
 
 
-def _draw_circle_chip(draw: ImageDraw.ImageDraw, x: int, y: int, w: int, h: int) -> None:
-    """The blue "circle" tab fused to the left end of the circle banner.
-    Unlike the banner itself this has no downloadable asset anywhere on
-    maimai DX NET (it only exists on the physical card), so it's drawn:
-    a double-pointed chevron with a white keyline and a three-figure
-    group glyph, matching the reference card."""
+def _vertical_gradient(size: tuple[int, int], stops: list[tuple[float, tuple[int, int, int]]]) -> Image.Image:
+    """A top-to-bottom gradient through `stops` (each an offset in 0..1
+    plus its color), interpolated linearly between neighbours. Painting
+    the chip with this rather than one flat fill is what keeps it from
+    reading as a dead sticker next to the banner's own shading."""
+    w, h = size
+    grad = Image.new("RGB", (1, h))
+    px = grad.load()
+    for y in range(h):
+        t = y / max(h - 1, 1)
+        lo = stops[0]
+        hi = stops[-1]
+        for i in range(len(stops) - 1):
+            if stops[i][0] <= t <= stops[i + 1][0]:
+                lo, hi = stops[i], stops[i + 1]
+                break
+        span = hi[0] - lo[0]
+        f = 0.0 if span <= 0 else (t - lo[0]) / span
+        px[0, y] = tuple(round(lo[1][c] + (hi[1][c] - lo[1][c]) * f) for c in range(3))
+    return grad.resize((w, h), Image.Resampling.NEAREST)
+
+
+def _paste_circle_chip(base: Image.Image, draw: ImageDraw.ImageDraw, x: int, y: int, w: int, h: int) -> None:
+    """The blue "circle" tab fused to the left end of the circle banner:
+    a double-pointed chevron with a white keyline and the three-figure
+    group glyph.
+
+    The chevron has no downloadable asset anywhere on maimai DX NET (it
+    only exists on the card itself), so it's drawn - but shaded with a
+    vertical gradient lifted off the real card rather than filled flat,
+    which is what made an earlier pass look pasted-on. The glyph inside
+    it *was* traced off the card and lives in assets/display/."""
     notch = h // 2
     poly = [
         (x, y + h // 2),
@@ -241,18 +239,62 @@ def _draw_circle_chip(draw: ImageDraw.ImageDraw, x: int, y: int, w: int, h: int)
         (x + w - notch, y + h),
         (x + notch, y + h),
     ]
-    draw.polygon(poly, fill=CIRCLE_CHIP_COLOR, outline=(255, 255, 255))
+    mask = Image.new("L", (w + 1, h + 1), 0)
+    ImageDraw.Draw(mask).polygon([(px_ - x, py_ - y) for px_, py_ in poly], fill=255)
+    base.paste(_vertical_gradient((w + 1, h + 1), CHIP_GRADIENT), (x, y), mask)
     draw.line(poly + [poly[0]], fill=(255, 255, 255), width=2, joint="curve")
 
-    # three little figures with their arms up
-    cx, cy = x + w // 2, y + h // 2
-    r = max(2, round(h * 0.10))
-    for dx in (-r * 5, 0, r * 5):
-        fx = cx + dx
-        draw.ellipse([(fx - r, cy - r * 4), (fx + r, cy - r * 2)], fill=(255, 255, 255))
-        draw.rounded_rectangle([(fx - r, cy - r), (fx + r, cy + r * 2)], radius=r, fill=(255, 255, 255))
-        draw.line([(fx - r, cy), (fx - r * 3, cy - r * 3)], fill=(255, 255, 255), width=max(2, r))
-        draw.line([(fx + r, cy), (fx + r * 3, cy - r * 3)], fill=(255, 255, 255), width=max(2, r))
+    try:
+        with Image.open(CHIP_ICON_PATH) as icon:
+            icon = icon.convert("RGBA")
+            target_h = max(1, round(h * 0.62))
+            target_w = max(1, round(icon.width * target_h / icon.height))
+            icon = icon.resize((target_w, target_h), Image.Resampling.LANCZOS)
+            base.paste(icon, (x + (w - target_w) // 2, y + (h - target_h) // 2), icon)
+    except (FileNotFoundError, OSError):
+        pass
+
+
+def _draw_monospaced_text(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font_path: str,
+    box_x: int,
+    box_y: int,
+    box_w: int,
+    box_h: int,
+    fill: tuple[int, int, int],
+    font_h: int,
+    letter_gap: int = 2,
+) -> None:
+    """Lays `text` out on a fixed pitch - every character gets the same
+    cell, `letter_gap` px wider than the widest glyph, and is centred in
+    it. maimai names are stored full-width (e.g. 'ｈｖｌ．ＥＭＵ☆'), and
+    the card prints them on an even pitch like this rather than at the
+    font's natural proportional advances, so a proportional layout reads
+    visibly tighter and more cramped than the real thing.
+
+    The font shrinks until the whole run fits `box_w`, so a long name
+    scales down instead of overflowing into the badge beside it."""
+    if not text:
+        return
+    size = font_h
+    while size > 6:
+        font = ImageFont.truetype(font_path, size)
+        cell = max(draw.textlength(ch, font=font) for ch in text) + letter_gap
+        if cell * len(text) <= box_w:
+            break
+        size -= 1
+    else:
+        font = ImageFont.truetype(font_path, 6)
+        cell = max(draw.textlength(ch, font=font) for ch in text) + letter_gap
+
+    bbox = draw.textbbox((0, 0), text, font=font)
+    y = box_y + (box_h - (bbox[3] - bbox[1])) / 2 - bbox[1]
+    x = box_x
+    for ch in text:
+        draw.text((x + (cell - draw.textlength(ch, font=font)) / 2, y), ch, font=font, fill=fill)
+        x += cell
 
 
 def _draw_outlined_text(
@@ -375,8 +417,7 @@ def render_display(
         outline=(200, 200, 200),
     )
     if profile.display_name:
-        _draw_tracked_text(
-            image,
+        _draw_monospaced_text(
             draw,
             profile.display_name,
             _JP_MEDIUM,
@@ -386,7 +427,7 @@ def render_display(
             ROW_B_H,
             (20, 20, 20),
             font_h=NAME_FONT_H,
-            min_tracking=0.55,
+            letter_gap=NAME_LETTER_GAP,
         )
     _paste_contain_left(
         image,
@@ -448,7 +489,7 @@ def render_display(
                 outline=(255, 255, 255),
                 width=2,
             )
-        _draw_circle_chip(draw, ribbon_x, ribbon_y, RIBBON_CHIP_W, RIBBON_H)
+        _paste_circle_chip(image, draw, ribbon_x, ribbon_y, RIBBON_CHIP_W, RIBBON_H)
         # the site prints the circle name over this banner in bold with a
         # white outline - the banner art is busy enough that plain dark
         # text on it is hard to read. Centred over the body only, so the
