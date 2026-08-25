@@ -427,13 +427,13 @@ def _extract_profile_fields(scope: LexborHTMLParser | LexborNode) -> dict:
         "rating": rating,
         "title": title,
         "title_tier": title_tier,
+        "title_plate_url": title_plate_url,
         "icon_url": icon_url,
         "course_rank_url": course_rank_url,
         "class_rank_url": class_rank_url,
         "rating_badge_url": rating_badge_url,
         "star_count": star_count,
     }
-
 
 def parse_profile(html: str) -> Profile:
     """Parses maimai DX NET's Player's Data page (confirmed live against a
@@ -468,20 +468,10 @@ def parse_profile(html: str) -> Profile:
 
     return Profile(
         **fields,
-        display_name=display_name,
-        rating=rating,
-        title=title,
-        title_tier=title_tier,
-        title_plate_url=title_plate_url,
-        icon_url=icon_url,
-        course_rank_url=course_rank_url,
-        class_rank_url=class_rank_url,
-        rating_badge_url=rating_badge_url,
         current_version_plays=current_version_plays,
         total_plays=total_plays,
         music_counts=music_counts,
     )
-
 
 def parse_friend_list(html: str) -> list[FriendEntry]:
     """Parses /friend/ (confirmed live this session). Each friend is a row
