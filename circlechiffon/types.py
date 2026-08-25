@@ -151,10 +151,15 @@ class Profile:
     rating: int | None = None
     title: str | None = None
     # the tier modifier class on .trophy_block (e.g. "Gold" from
-    # "trophy_Gold") - there's no image asset for the title/trophy banner
-    # at all (confirmed live via collection/trophy/'s DOM), so this is
-    # only used to pick a color scheme for a hand-drawn plaque.
+    # "trophy_Gold"). The banner itself IS an image asset after all -
+    # .trophy_block carries it as a CSS `background-image`
+    # (img/trophy_<tier>.png, 268x25) rather than an <img>, which is why
+    # an earlier DOM sweep for <img> tags concluded there wasn't one.
     title_tier: str | None = None
+    # img/trophy_<tier>.png, derived from title_tier - the real banner
+    # graphic, so /cc-display doesn't have to hand-draw a plaque whose
+    # colors would drift as SEGA changes tiers.
+    title_plate_url: str | None = None
     icon_url: str | None = None
     # course-rank (dan, e.g. 七段) and class-rank (e.g. "A4") badges are pure
     # images on maimai DX NET with hash-coded filenames - no accompanying
@@ -230,3 +235,8 @@ class Circle:
     points_this_month: int | None = None
     rank_this_month: int | None = None
     members: list[CircleMember] = field(default_factory=list)
+    # .circle_profile_class's img - the circle's rank-colored name banner
+    # (img/circle/profile/circle_profile_color_<color>.png, 300x44). The
+    # color varies with the circle's class, so this is scraped rather than
+    # assumed.
+    color_url: str | None = None

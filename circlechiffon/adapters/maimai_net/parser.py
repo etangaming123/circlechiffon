@@ -3,6 +3,7 @@ from datetime import datetime
 
 from selectolax.lexbor import LexborHTMLParser, LexborNode
 
+from circlechiffon.adapters.maimai_net import urls
 from circlechiffon.types import (
     ChartType,
     Circle,
@@ -334,6 +335,13 @@ def parse_profile(html: str) -> Profile:
                 title_tier = cls.removeprefix("trophy_")
                 break
 
+    # the banner graphic itself is a stylesheet-level `background-image` on
+    # .trophy_block (not an inline style, and not an <img>), so it can't be
+    # read out of the page markup - but the filename is a pure function of
+    # the tier class above, verified live for Normal/Bronze/Silver/Gold/
+    # Rainbow (all 268x25 PNGs).
+    title_plate_url = urls.trophy_plate_url(title_tier)
+
     # confirmed live: the player's icon is the first img.w_112.f_l directly
     # inside .basic_block - the previously-guessed .friend_block_icon class
     # doesn't exist anywhere in the real markup.
@@ -386,6 +394,7 @@ def parse_profile(html: str) -> Profile:
         rating=rating,
         title=title,
         title_tier=title_tier,
+        title_plate_url=title_plate_url,
         icon_url=icon_url,
         course_rank_url=course_rank_url,
         class_rank_url=class_rank_url,
@@ -626,6 +635,12 @@ def parse_circle(html: str) -> Circle | None:
         if m:
             rank_this_month = _parse_int(m.group(1))
 
+    # .circle_profile_class holds the rank-colored banner the circle's name
+    # is printed over on the real page - confirmed live this session
+    # (img/circle/profile/circle_profile_color_bronze.png, 300x44).
+    color_node = tree.css_first(".circle_profile_class img")
+    color_url = color_node.attributes.get("src") if color_node is not None else None
+
     return Circle(
         name=name,
         code=code,
@@ -634,6 +649,7 @@ def parse_circle(html: str) -> Circle | None:
         tags=tags,
         points_this_month=points_this_month,
         rank_this_month=rank_this_month,
+        color_url=color_url,
     )
 
 
