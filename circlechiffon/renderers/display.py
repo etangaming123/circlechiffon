@@ -64,13 +64,16 @@ NAME_LETTER_GAP = 3  # min px of clearance between adjacent glyphs' ink
 TITLE_W, TITLE_H = 268, 25
 
 # The circle banner (img/circle/profile/circle_profile_color_*.png) is
-# natively 300x44, but the card prints it squashed to roughly 272x21 -
-# measured off the real card, where it sits just under the nameplate's
-# bottom edge and slightly left of the name column. Letting it keep its
-# native aspect instead would make it nearly twice as tall as the title
-# bar above it and swamp the card, so the squash is deliberate.
+# natively 300x44, but the card prints it much wider than tall - measured
+# off the real card, where it sits just under the nameplate's bottom edge
+# and slightly left of the name column. Letting it keep its native aspect
+# instead would make it nearly twice as tall as the title bar above it and
+# swamp the card, so it's three-sliced (see _paste_sliced_plate) rather
+# than resized: the chevron ends and their embossed stars stay in
+# proportion and only the flat middle takes up the slack.
 RIBBON_W = NAME_BOX_W
-RIBBON_H = 22
+RIBBON_H = 24
+RIBBON_CAP_FRAC = 0.22  # reaches past the stars into the plain gradient
 RIBBON_X_OFFSET = -9  # relative to CONTENT_X
 RIBBON_Y_OVERLAP = 2  # how far it rides up over the nameplate's bottom edge
 RIBBON_CHIP_W = 50
@@ -192,6 +195,58 @@ def _paste_plate(base: Image.Image, plate_bytes: bytes | None, pos: tuple[int, i
     try:
         with Image.open(io.BytesIO(plate_bytes)) as img:
             plate = img.convert("RGBA").resize(size, Image.Resampling.LANCZOS)
+            base.paste(plate, pos, plate)
+            return True
+    except Exception:
+        return False
+
+
+def _paste_sliced_plate(
+    base: Image.Image,
+    plate_bytes: bytes | None,
+    pos: tuple[int, int],
+    size: tuple[int, int],
+    cap_frac: float,
+) -> bool:
+    """Three-slice horizontal scale: the two end caps scale *uniformly*
+    (by the height ratio alone, keeping their aspect) and only the flat
+    middle is stretched to make up the width.
+
+    A plain resize distorts, because the target is nowhere near the
+    asset's own aspect - the circle banner is 300x44 natively but the card
+    prints it around 230x22, so a straight resize squashes it to half
+    height while only trimming a quarter of the width. That shows up on
+    everything with a recognisable shape: the chevron points flatten out
+    and the embossed stars go oval. Slicing keeps those ends honest and
+    puts the whole discrepancy into the middle, which is a smooth gradient
+    with nothing in it to look wrong.
+
+    `cap_frac` is how much of the source width each cap claims - it needs
+    to reach past the last shaped element (the stars, here). Falls back to
+    a plain resize if the caps wouldn't fit the target width."""
+    if not plate_bytes:
+        return False
+    try:
+        with Image.open(io.BytesIO(plate_bytes)) as img:
+            img = img.convert("RGBA")
+            target_w, target_h = size
+            cap_src = max(1, round(img.width * cap_frac))
+            cap_dst = max(1, round(cap_src * target_h / img.height))
+            if cap_dst * 2 >= target_w or cap_src * 2 >= img.width:
+                base.paste(img.resize(size, Image.Resampling.LANCZOS), pos, img.resize(size, Image.Resampling.LANCZOS))
+                return True
+
+            plate = Image.new("RGBA", size, (0, 0, 0, 0))
+            left = img.crop((0, 0, cap_src, img.height)).resize((cap_dst, target_h), Image.Resampling.LANCZOS)
+            right = img.crop((img.width - cap_src, 0, img.width, img.height)).resize(
+                (cap_dst, target_h), Image.Resampling.LANCZOS
+            )
+            middle = img.crop((cap_src, 0, img.width - cap_src, img.height)).resize(
+                (target_w - cap_dst * 2, target_h), Image.Resampling.LANCZOS
+            )
+            plate.paste(left, (0, 0))
+            plate.paste(middle, (cap_dst, 0))
+            plate.paste(right, (target_w - cap_dst, 0))
             base.paste(plate, pos, plate)
             return True
     except Exception:
@@ -491,7 +546,9 @@ def render_display(
         # chip swallows the banner art's own left-hand star.
         body_x = ribbon_x + RIBBON_CHIP_W - RIBBON_CHIP_OVERLAP
         body_w = RIBBON_W - RIBBON_CHIP_W + RIBBON_CHIP_OVERLAP
-        if not _paste_plate(image, circle_color_bytes, (body_x, ribbon_y), (body_w, RIBBON_H)):
+        if not _paste_sliced_plate(
+            image, circle_color_bytes, (body_x, ribbon_y), (body_w, RIBBON_H), RIBBON_CAP_FRAC
+        ):
             draw.rounded_rectangle(
                 [(body_x, ribbon_y), (body_x + body_w, ribbon_y + RIBBON_H)],
                 radius=6,
@@ -512,7 +569,7 @@ def render_display(
             (11, 56, 113),
             (255, 255, 255),
             stroke=2,
-            font_h=RIBBON_H - 9,
+            font_h=RIBBON_H - 11,
         )
 
     image.save(output, "PNG", compress_level=3)
