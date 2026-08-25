@@ -56,8 +56,8 @@ ROW_C_Y, ROW_C_H = 88, 25  # title, bottom row
 # against the box's right edge.
 NAME_PAD_L, NAME_TEXT_W, NAME_BADGE_GAP, NAME_BADGE_W, NAME_PAD_R = 4, 174, 6, 80, 8
 NAME_BOX_W = NAME_PAD_L + NAME_TEXT_W + NAME_BADGE_GAP + NAME_BADGE_W + NAME_PAD_R
-NAME_FONT_H = 32
-NAME_LETTER_GAP = 3  # min px of clearance between adjacent glyphs' ink
+NAME_FONT_H = 34
+NAME_PITCH_RATIO = 0.76  # cell width as a fraction of the font size
 
 # img/trophy_<tier>.png's own pixel size on the live site - the title bar
 # is that asset at 1:1, not a scaled guess.
@@ -323,32 +323,34 @@ def _draw_monospaced_text(
     box_h: int,
     fill: tuple[int, int, int],
     font_h: int,
-    letter_gap: int = 2,
+    pitch_ratio: float,
 ) -> None:
-    """Lays `text` out on a fixed pitch - the box is divided into equal
-    cells, one per character, and each glyph is centred in its own cell.
-    maimai names are stored full-width (e.g. 'ｈｖｌ．ＥＭＵ☆') and the
-    card prints them evenly spaced like this; laying them out at the
-    font's natural advances reads visibly tighter and more cramped.
+    """Lays `text` out on a fixed pitch - every character gets a cell
+    `pitch_ratio` x the font size wide and is centred in it. maimai names
+    are stored full-width (e.g. 'ｈｖｌ．ＥＭＵ☆') and the card prints
+    them evenly spaced like this; laying them out at the font's natural
+    advances reads visibly tighter and more cramped.
 
-    Glyph size is chosen by *height*, independently of the pitch. Tying
-    the two together (pitch = advance + gap) is what kept the name small:
-    a full-width advance is a whole em, so eight characters across 168px
-    forced an 18px font even though each glyph's ink only needs about
-    half that width. The size only drops if a glyph's actual ink would
-    crowd its neighbour, leaving `letter_gap` px of clearance."""
+    The pitch is tied to the font size rather than to either the box
+    width or the glyphs' own metrics, because both of those alternatives
+    misbehave here. Dividing the box into equal cells pins the spacing to
+    whatever the box happens to be, so the name can't be made tighter
+    without also making the field narrower. Deriving it from the widest
+    glyph is worse: '☆' inks out to a full em while Latin letters only
+    reach about 0.55 of one, so a single star in the name would space out
+    everything around it. A ratio under 1.0 lets the star overhang its
+    cell slightly, which is fine - what it overhangs into is its
+    neighbours' side bearings, not their ink.
+
+    The size only shrinks from `font_h` if the whole run wouldn't fit
+    `box_w`, so a long name scales down instead of overflowing."""
     if not text:
         return
-    cell = box_w / len(text)
     size = font_h
-    while size > 6:
-        font = ImageFont.truetype(font_path, size)
-        widest = max(draw.textbbox((0, 0), ch, font=font)[2] - draw.textbbox((0, 0), ch, font=font)[0] for ch in text)
-        if widest <= cell - letter_gap:
-            break
+    while size > 6 and round(size * pitch_ratio) * len(text) > box_w:
         size -= 1
-    else:
-        font = ImageFont.truetype(font_path, 6)
+    font = ImageFont.truetype(font_path, size)
+    cell = round(size * pitch_ratio)
 
     bbox = draw.textbbox((0, 0), text, font=font)
     y = box_y + (box_h - (bbox[3] - bbox[1])) / 2 - bbox[1]
@@ -492,7 +494,7 @@ def render_display(
             ROW_B_H,
             (20, 20, 20),
             font_h=NAME_FONT_H,
-            letter_gap=NAME_LETTER_GAP,
+            pitch_ratio=NAME_PITCH_RATIO,
         )
     _paste_contain_left(
         image,
@@ -568,8 +570,8 @@ def render_display(
             (body_x + 14, ribbon_y, body_w - 28, RIBBON_H),
             (11, 56, 113),
             (255, 255, 255),
-            stroke=2,
-            font_h=RIBBON_H - 11,
+            stroke=1,
+            font_h=RIBBON_H - 13,
         )
 
     image.save(output, "PNG", compress_level=3)
