@@ -39,20 +39,23 @@ _DIFFICULTY_MAP = {
     "remaster": Difficulty.remaster,
 }
 
+# markers confirmed live against real maimai DX NET score-list markup
+# (music_icon_<tier>.png) - a prior version of this list guessed wrong
+# filenames for the "+" tiers (e.g. "applus.png"/"fcplus.png") that never
+# matched anything on the real site, silently dropping AP+/FC+ combo badges
+# and FS+/FDX/FDX+ sync badges (only the un-plussed tiers happened to match,
+# since e.g. "fc.png" is coincidentally a substring of "music_icon_fc.png").
 _FLAG_MATCHERS: list[tuple[str, ComboFlag]] = [
-    ("applus.png", ComboFlag.app),
+    ("app.png", ComboFlag.app),
     ("ap.png", ComboFlag.ap),
-    ("fcplus.png", ComboFlag.fcp),
+    ("fcp.png", ComboFlag.fcp),
     ("fc.png", ComboFlag.fc),
 ]
 
-# most-specific first isn't actually required here (the ".png" suffix makes
-# these filename markers mutually exclusive as substrings of each other),
-# but ordered from most to least specific for clarity anyway
 _SYNC_MATCHERS: list[tuple[str, SyncFlag]] = [
-    ("fsdplus.png", SyncFlag.fsdp),
-    ("fsd.png", SyncFlag.fsd),
-    ("fsplus.png", SyncFlag.fsp),
+    ("fdxp.png", SyncFlag.fsdp),
+    ("fdx.png", SyncFlag.fsd),
+    ("fsp.png", SyncFlag.fsp),
     ("fs.png", SyncFlag.fs),
     ("sync.png", SyncFlag.sync),
 ]
