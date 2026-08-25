@@ -235,7 +235,7 @@ class FriendsCog(commands.Cog):
 
     @app_commands.command(
         name="cc-friend-best",
-        description="Render a friend's best-50 rating image, computed from their scores (SEGA never shows a friend's real rating)",
+        description="Render a friend's best-50 rating image, computed from their scores.",
     )
     @app_commands.describe(friend="Friend's display name (or their exact id from /cc-friends show_ids:True)")
     @app_commands.allowed_installs(guilds=True, users=True)
