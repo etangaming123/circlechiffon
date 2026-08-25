@@ -50,7 +50,8 @@ def _score_embed(
     for score in matches:
         type_name = score.chart_type.value.upper() if score.chart_type else "?"
         rank_tag = rank_tag_for_achievement(score.achievement)
-        value_lines = [f"{badge_emojis.rank_badge(rank_tag)} {score.achievement:.4f}%"]
+        achievement_text = "No Chart" if score.achievement == 0 else f"{score.achievement:.4f}%"
+        value_lines = [f"{badge_emojis.rank_badge(rank_tag)} {achievement_text}"]
         if score.dx_score is not None and score.dx_score_total is not None:
             value_lines.append(f"DX Score: {score.dx_score:,} / {score.dx_score_total:,}")
         value_lines.append(

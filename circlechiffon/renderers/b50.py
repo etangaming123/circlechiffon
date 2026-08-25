@@ -313,11 +313,13 @@ def _render_cell(
         fill=fg,
     )
 
+    is_no_chart = entry.score.achievement == 0
+    achievement_text = "No Chart" if is_no_chart else f"{entry.score.achievement:.4f}%"
     draw.text(
         (text_x, card_pos[1] + 46),
-        f"{entry.score.achievement:.4f}%",
+        achievement_text,
         font=FONT_RATING,
-        fill=fg,
+        fill=(150, 150, 155) if is_no_chart else fg,
     )
 
     # icon row - shifted a few px further from the achievement % line

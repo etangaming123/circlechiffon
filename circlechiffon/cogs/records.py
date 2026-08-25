@@ -112,7 +112,8 @@ def _build_track_embed(
         if score.dx_score is not None and score.dx_score_total is not None
         else "-"
     )
-    lines.append(f"RANK: {badge_emojis.rank_badge(rank_tag)} - ACC: **{score.achievement:.4f}%**")
+    achievement_text = "No Chart" if score.achievement == 0 else f"{score.achievement:.4f}%"
+    lines.append(f"RANK: {badge_emojis.rank_badge(rank_tag)} - ACC: **{achievement_text}**")
     lines.append(f"DXSCORE: **{dx_part}** - RATING: **{rating if rating is not None else '-'}**")
     lines.append(f"Combo: {badge_emojis.combo_badge(score.combo_flag)}  Sync: {badge_emojis.sync_badge(score.sync_flag)}")
 
@@ -427,7 +428,7 @@ class RecordsCog(commands.Cog):
             await asyncio.to_thread(
                 render_b50,
                 player_name=profile.display_name,
-                rating=profile.rating,
+                rating=result.total_rating if next_update else profile.rating,
                 icon_bytes=icon_bytes,
                 rating_badge_bytes=rating_badge_bytes,
                 result=result,
