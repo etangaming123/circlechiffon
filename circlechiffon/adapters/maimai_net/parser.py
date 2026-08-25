@@ -14,6 +14,7 @@ from circlechiffon.types import (
     MissionEntry,
     MusicCountEntry,
     NoteTypeJudgement,
+    Photo,
     Profile,
     ProfileExtras,
     RecentScore,
@@ -232,6 +233,57 @@ def parse_music_records(html: str) -> list[Score]:
                 combo_flag=combo_flag,
                 sync_flag=sync_flag,
                 idx=idx,
+            )
+        )
+
+    return results
+
+
+def parse_photos(html: str) -> list[Photo]:
+    """Parses playerData/photo/ (the in-game "Album") - confirmed live
+    this session. Each photo is one `div.m_10.p_5.f_0` block: title in
+    `.black_block`, the "YYYY/MM/DD HH:MM" timestamp in `.block_info`
+    (same format `_parse_played_at` already handles), chart type/
+    difficulty via the same icon-filename convention as
+    `parse_music_records` (`.music_kind_icon` / a diff icon - `h_16.f_l`
+    here rather than `h_20.f_l`, but `_classify_type_and_difficulty`
+    only cares about the filename), and the venue name in the second
+    `.col2`'s `.see_through_block`. The photo itself is `img.w_430`'s
+    `src` - skip the block entirely if that's missing, since without an
+    image there's nothing to show; every other field degrades to None."""
+    tree = LexborHTMLParser(html)
+    results: list[Photo] = []
+
+    for block in tree.css(".m_10.p_5.f_0"):
+        image_node = block.css_first("img.w_430")
+        image_url = image_node.attributes.get("src") if image_node is not None else None
+        if not image_url:
+            continue
+
+        title_node = block.css_first(".black_block")
+        title = title_node.text(strip=True) if title_node is not None else None
+
+        date_node = block.css_first(".block_info")
+        played_at = _parse_played_at(date_node.text() if date_node is not None else None)
+
+        type_icon = block.css_first(".music_kind_icon")
+        diff_icon = block.css_first(".h_16.f_l")
+        chart_type, difficulty = _classify_type_and_difficulty(
+            type_icon.attributes.get("src") if type_icon else None,
+            diff_icon.attributes.get("src") if diff_icon else None,
+        )
+
+        venue_node = block.css_first(".col2.f_r .see_through_block")
+        venue = venue_node.text(strip=True) if venue_node is not None else None
+
+        results.append(
+            Photo(
+                image_url=image_url,
+                title=title,
+                difficulty=difficulty,
+                chart_type=chart_type,
+                played_at=played_at,
+                venue=venue,
             )
         )
 

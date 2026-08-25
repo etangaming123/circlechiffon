@@ -10,6 +10,7 @@ INTL = {
     "LOGIN_OTP_ENDPOINT": "https://lng-tgk-aime-gw.am-all.net/common_auth/login/otpauth",
     "HOME_PAGE": "https://maimaidx-eng.com/maimai-mobile/home/",
     "PLAYER_DATA_PAGE": "https://maimaidx-eng.com/maimai-mobile/playerData/",
+    "PHOTO_PAGE": "https://maimaidx-eng.com/maimai-mobile/playerData/photo/",
     "RECORD_RECENT_PAGE": "https://maimaidx-eng.com/maimai-mobile/record",
     "RECORD_MUSICS_PAGE": "https://maimaidx-eng.com/maimai-mobile/record/musicGenre/search/",
     "RECORD_DETAIL_PAGE": "https://maimaidx-eng.com/maimai-mobile/record/playlogDetail/",
