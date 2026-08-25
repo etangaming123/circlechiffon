@@ -7,24 +7,23 @@ from circlechiffon.renderers.b50 import (
     FONT_DIR,
     RATING_ACCENT_COLOR as RATING_TEXT_COLOR,
     _TIER_COLORS,
-    _diagonal_gradient,
     _draw_guide_box,
     _fit_font,
     _hex_to_rgb,
     _paste_rating_badge,
     _paste_scaled,
     _rounded_mask,
-    _truncate_to_width,
 )
 from circlechiffon.types import Circle, Profile
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent.parent / "assets"
 FALLBACK_TEMPLATE_PATH = ASSETS_DIR / "b50" / "template.png"
+# traced off the reference card - the group glyph on the circle banner's
+# blue tab, which SEGA doesn't serve as a file anywhere.
+CHIP_ICON_PATH = ASSETS_DIR / "display" / "circle_chip_icon.png"
 
 _JP_BOLD = str(FONT_DIR / "NotoSansJP-Bold.ttf")
 _JP_MEDIUM = str(FONT_DIR / "NotoSansJP-Medium.ttf")
-
-FONT_RIBBON = ImageFont.truetype(_JP_MEDIUM, 20)
 
 # Fixed output canvas - the equipped Frame collectible is a full-bleed
 # backdrop covering the whole thing. The nameplate is a fixed-size inset
@@ -48,23 +47,50 @@ CONTENT_RIGHT = NAMEPLATE_X + NAMEPLATE_W - 8  # inner right margin most rows st
 CLASS_GAP = 6  # class badge sits this far right of the rating pill's own right edge
 
 # row geometry within the 117-tall nameplate.
-_ROW_SCALE = NAMEPLATE_H / 134  # still used for the ribbon sizing below
 ROW_A_Y, ROW_A_H = 5, 33  # rating pill + class badge
 ROW_B_Y, ROW_B_H = 41, 45  # name box + dan badge
 ROW_C_Y, ROW_C_H = 88, 25  # title, bottom row
 
-RIBBON_GAP = 8  # circle label sits this far below the nameplate, not overlapping it
-RIBBON_H = round(40 * _ROW_SCALE)
-RIBBON_W = round(358 * _ROW_SCALE)
-RIBBON_CHIP_W = round(46 * _ROW_SCALE)
-RIBBON_NOTCH = round(14 * _ROW_SCALE)
+# Row B's inner split, measured off the reference render: the name field
+# and the dan badge share one 272-wide white box, with the badge fused
+# against the box's right edge.
+NAME_PAD_L, NAME_TEXT_W, NAME_BADGE_GAP, NAME_BADGE_W, NAME_PAD_R = 4, 174, 6, 80, 8
+NAME_BOX_W = NAME_PAD_L + NAME_TEXT_W + NAME_BADGE_GAP + NAME_BADGE_W + NAME_PAD_R
+NAME_FONT_H = 34
+NAME_PITCH_RATIO = 0.76  # cell width as a fraction of the font size
+
+# img/trophy_<tier>.png's own pixel size on the live site - the title bar
+# is that asset at 1:1, not a scaled guess.
+TITLE_W, TITLE_H = 268, 25
+
+# The circle banner (img/circle/profile/circle_profile_color_*.png) is
+# natively 300x44, but the card prints it much wider than tall - measured
+# off the real card, where it sits just under the nameplate's bottom edge
+# and slightly left of the name column. Letting it keep its native aspect
+# instead would make it nearly twice as tall as the title bar above it and
+# swamp the card, so it's three-sliced (see _paste_sliced_plate) rather
+# than resized: the chevron ends and their embossed stars stay in
+# proportion and only the flat middle takes up the slack.
+RIBBON_W = NAME_BOX_W
+RIBBON_H = 24
+RIBBON_CAP_FRAC = 0.22  # reaches past the stars into the plain gradient
+RIBBON_X_OFFSET = -9  # relative to CONTENT_X
+RIBBON_Y_OVERLAP = 2  # how far it rides up over the nameplate's bottom edge
+RIBBON_CHIP_W = 50
+RIBBON_CHIP_OVERLAP = 8  # how far the banner tucks in behind the chip
+# sampled down the real chip: bright at the top, a darker band across the
+# middle, then a highlight below it - the glossy-bar shading that a flat
+# fill loses.
+CHIP_GRADIENT = [
+    (0.00, (42, 100, 212)),
+    (0.45, (42, 83, 185)),
+    (0.55, (76, 124, 214)),
+    (1.00, (45, 109, 215)),
+]
 
 BACKGROUND_COLOR = (24, 24, 32)
 
 CARD_BORDER_COLOR = (198, 148, 84)
-RIBBON_CHIP_COLOR = (30, 60, 150)
-RIBBON_GRADIENT_1 = "#7e2a13"
-RIBBON_GRADIENT_2 = "#db983f"
 
 def _cover_fit(image: Image.Image, target_w: int, target_h: int) -> Image.Image:
     """Scales `image` to fully cover a target_w x target_h box (matching
@@ -155,8 +181,139 @@ def _paste_contain_left(
         return 0
 
 
-def _draw_tracked_text(
-    image: Image.Image,
+
+def _paste_plate(base: Image.Image, plate_bytes: bytes | None, pos: tuple[int, int], size: tuple[int, int]) -> bool:
+    """Pastes a UI plate asset (the trophy/title banner, the circle's name
+    banner) resized to exactly `size`, honouring its alpha. These are
+    9-slice-ish bars SEGA already ships at the right proportions, so a
+    straight resize is faithful - and using the real asset is the only way
+    the colors stay correct, since both change with the account's title
+    tier / the circle's class. Returns False if there was nothing to
+    paste, so callers can fall back to drawing their own."""
+    if not plate_bytes:
+        return False
+    try:
+        with Image.open(io.BytesIO(plate_bytes)) as img:
+            plate = img.convert("RGBA").resize(size, Image.Resampling.LANCZOS)
+            base.paste(plate, pos, plate)
+            return True
+    except Exception:
+        return False
+
+
+def _paste_sliced_plate(
+    base: Image.Image,
+    plate_bytes: bytes | None,
+    pos: tuple[int, int],
+    size: tuple[int, int],
+    cap_frac: float,
+) -> bool:
+    """Three-slice horizontal scale: the two end caps scale *uniformly*
+    (by the height ratio alone, keeping their aspect) and only the flat
+    middle is stretched to make up the width.
+
+    A plain resize distorts, because the target is nowhere near the
+    asset's own aspect - the circle banner is 300x44 natively but the card
+    prints it around 230x22, so a straight resize squashes it to half
+    height while only trimming a quarter of the width. That shows up on
+    everything with a recognisable shape: the chevron points flatten out
+    and the embossed stars go oval. Slicing keeps those ends honest and
+    puts the whole discrepancy into the middle, which is a smooth gradient
+    with nothing in it to look wrong.
+
+    `cap_frac` is how much of the source width each cap claims - it needs
+    to reach past the last shaped element (the stars, here). Falls back to
+    a plain resize if the caps wouldn't fit the target width."""
+    if not plate_bytes:
+        return False
+    try:
+        with Image.open(io.BytesIO(plate_bytes)) as img:
+            img = img.convert("RGBA")
+            target_w, target_h = size
+            cap_src = max(1, round(img.width * cap_frac))
+            cap_dst = max(1, round(cap_src * target_h / img.height))
+            if cap_dst * 2 >= target_w or cap_src * 2 >= img.width:
+                base.paste(img.resize(size, Image.Resampling.LANCZOS), pos, img.resize(size, Image.Resampling.LANCZOS))
+                return True
+
+            plate = Image.new("RGBA", size, (0, 0, 0, 0))
+            left = img.crop((0, 0, cap_src, img.height)).resize((cap_dst, target_h), Image.Resampling.LANCZOS)
+            right = img.crop((img.width - cap_src, 0, img.width, img.height)).resize(
+                (cap_dst, target_h), Image.Resampling.LANCZOS
+            )
+            middle = img.crop((cap_src, 0, img.width - cap_src, img.height)).resize(
+                (target_w - cap_dst * 2, target_h), Image.Resampling.LANCZOS
+            )
+            plate.paste(left, (0, 0))
+            plate.paste(middle, (cap_dst, 0))
+            plate.paste(right, (target_w - cap_dst, 0))
+            base.paste(plate, pos, plate)
+            return True
+    except Exception:
+        return False
+
+
+def _vertical_gradient(size: tuple[int, int], stops: list[tuple[float, tuple[int, int, int]]]) -> Image.Image:
+    """A top-to-bottom gradient through `stops` (each an offset in 0..1
+    plus its color), interpolated linearly between neighbours. Painting
+    the chip with this rather than one flat fill is what keeps it from
+    reading as a dead sticker next to the banner's own shading."""
+    w, h = size
+    grad = Image.new("RGB", (1, h))
+    px = grad.load()
+    for y in range(h):
+        t = y / max(h - 1, 1)
+        lo = stops[0]
+        hi = stops[-1]
+        for i in range(len(stops) - 1):
+            if stops[i][0] <= t <= stops[i + 1][0]:
+                lo, hi = stops[i], stops[i + 1]
+                break
+        span = hi[0] - lo[0]
+        f = 0.0 if span <= 0 else (t - lo[0]) / span
+        px[0, y] = tuple(round(lo[1][c] + (hi[1][c] - lo[1][c]) * f) for c in range(3))
+    return grad.resize((w, h), Image.Resampling.NEAREST)
+
+
+def _paste_circle_chip(base: Image.Image, draw: ImageDraw.ImageDraw, x: int, y: int, w: int, h: int) -> None:
+    """The blue "circle" tab fused to the left end of the circle banner:
+    a double-pointed chevron with a white keyline and the three-figure
+    group glyph.
+
+    The chevron has no downloadable asset anywhere on maimai DX NET (it
+    only exists on the card itself), so it's drawn - but shaded with a
+    vertical gradient lifted off the real card rather than filled flat,
+    which is what made an earlier pass look pasted-on. The glyph inside
+    it *was* traced off the card and lives in assets/display/."""
+    # <=< , not <=> : the left end points outward, but the right end is a
+    # notch cut *into* the chip, which is what the banner's own left point
+    # nests into.
+    notch = h // 2
+    poly = [
+        (x, y + h // 2),
+        (x + notch, y),
+        (x + w, y),
+        (x + w - notch, y + h // 2),
+        (x + w, y + h),
+        (x + notch, y + h),
+    ]
+    mask = Image.new("L", (w + 1, h + 1), 0)
+    ImageDraw.Draw(mask).polygon([(px_ - x, py_ - y) for px_, py_ in poly], fill=255)
+    base.paste(_vertical_gradient((w + 1, h + 1), CHIP_GRADIENT), (x, y), mask)
+    draw.line(poly + [poly[0]], fill=(255, 255, 255), width=2, joint="curve")
+
+    try:
+        with Image.open(CHIP_ICON_PATH) as icon:
+            icon = icon.convert("RGBA")
+            target_h = max(1, round(h * 0.62))
+            target_w = max(1, round(icon.width * target_h / icon.height))
+            icon = icon.resize((target_w, target_h), Image.Resampling.LANCZOS)
+            base.paste(icon, (x + (w - target_w) // 2, y + (h - target_h) // 2), icon)
+    except (FileNotFoundError, OSError):
+        pass
+
+
+def _draw_monospaced_text(
     draw: ImageDraw.ImageDraw,
     text: str,
     font_path: str,
@@ -165,48 +322,77 @@ def _draw_tracked_text(
     box_w: int,
     box_h: int,
     fill: tuple[int, int, int],
-    center: bool = False,
-    min_tracking: float = 0.68,
-    font_h: int | None = None,
+    font_h: int,
+    pitch_ratio: float,
 ) -> None:
-    """Draws `text` sized to fit font_h (defaults to box_h), pulling
-    letters closer together (reduced tracking between glyphs, like
-    negative letter-spacing) if the natural width overflows box_w -
-    unlike a horizontal resize, each glyph keeps its own proportions,
-    it's just packed tighter. Vertically centered within the full box_h
-    even when font_h is smaller (e.g. a title bar taller than the text
-    should actually render at). Only truncates as a last resort, if even
-    the tightest tracking isn't enough."""
+    """Lays `text` out on a fixed pitch - every character gets a cell
+    `pitch_ratio` x the font size wide and is centred in it. maimai names
+    are stored full-width (e.g. 'ｈｖｌ．ＥＭＵ☆') and the card prints
+    them evenly spaced like this; laying them out at the font's natural
+    advances reads visibly tighter and more cramped.
+
+    The pitch is tied to the font size rather than to either the box
+    width or the glyphs' own metrics, because both of those alternatives
+    misbehave here. Dividing the box into equal cells pins the spacing to
+    whatever the box happens to be, so the name can't be made tighter
+    without also making the field narrower. Deriving it from the widest
+    glyph is worse: '☆' inks out to a full em while Latin letters only
+    reach about 0.55 of one, so a single star in the name would space out
+    everything around it. A ratio under 1.0 lets the star overhang its
+    cell slightly, which is fine - what it overhangs into is its
+    neighbours' side bearings, not their ink.
+
+    The size only shrinks from `font_h` if the whole run wouldn't fit
+    `box_w`, so a long name scales down instead of overflowing."""
     if not text:
         return
-    font = _fit_font(draw, text, font_path, 10_000, font_h if font_h is not None else box_h)
-    natural_w = draw.textlength(text, font=font)
-    tracking = min(1.0, box_w / natural_w) if natural_w > 0 else 1.0
-    tracking = max(tracking, min_tracking)
-    while text and draw.textlength(text, font=font) * tracking > box_w:
-        text = text[:-1]
+    size = font_h
+    while size > 6 and round(size * pitch_ratio) * len(text) > box_w:
+        size -= 1
+    font = ImageFont.truetype(font_path, size)
+    cell = round(size * pitch_ratio)
+
     bbox = draw.textbbox((0, 0), text, font=font)
-    text_h = bbox[3] - bbox[1]
-    total_w = draw.textlength(text, font=font) * tracking
-    x = box_x + (box_w - total_w) / 2 if center else box_x
-    y = box_y + (box_h - text_h) / 2 - bbox[1]
-    for ch in text:
-        draw.text((x, y), ch, font=font, fill=fill)
-        x += draw.textlength(ch, font=font) * tracking
+    y = box_y + (box_h - (bbox[3] - bbox[1])) / 2 - bbox[1]
+    for i, ch in enumerate(text):
+        ink = draw.textbbox((0, 0), ch, font=font)
+        draw.text(
+            (box_x + cell * i + (cell - (ink[2] - ink[0])) / 2 - ink[0], y),
+            ch,
+            font=font,
+            fill=fill,
+        )
 
 
-def _ribbon_polygon(x0: int, y0: int, x1: int, y1: int, notch: int) -> list[tuple[int, int]]:
-    """A banner/ribbon shape: concave notch on the left edge (where it
-    meets the icon chip), convex point on the right edge."""
-    mid_y = (y0 + y1) // 2
-    return [
-        (x0 + notch, y0),
-        (x1, y0),
-        (x1 + notch, mid_y),
-        (x1, y1),
-        (x0 + notch, y1),
-        (x0, mid_y),
-    ]
+def _draw_outlined_text(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font_path: str,
+    box: tuple[int, int, int, int],
+    fill: tuple[int, int, int],
+    outline: tuple[int, int, int],
+    stroke: int = 1,
+    font_h: int | None = None,
+) -> None:
+    """Centers `text` in `box` (x, y, w, h) with a solid outline around
+    every glyph - maimai DX NET draws both the title and the circle name
+    this way (an 8-direction 1px text-shadow in its CSS), which is what
+    keeps them readable over the busy plate art underneath."""
+    if not text:
+        return
+    x, y, w, h = box
+    inner_w = w - stroke * 2
+    font = _fit_font(draw, text, font_path, inner_w, font_h if font_h is not None else h)
+    bbox = draw.textbbox((0, 0), text, font=font)
+    text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    draw.text(
+        (x + (w - text_w) / 2 - bbox[0], y + (h - text_h) / 2 - bbox[1]),
+        text,
+        font=font,
+        fill=fill,
+        stroke_width=stroke,
+        stroke_fill=outline,
+    )
 
 
 def render_display(
@@ -220,6 +406,8 @@ def render_display(
     nameplate_bytes: bytes | None,
     frame_bytes: bytes | None,
     tour_member_bytes: bytes | None,
+    title_plate_bytes: bytes | None = None,
+    circle_color_bytes: bytes | None = None,
     output,
 ) -> None:
     """Synchronous - CPU-bound Pillow work. Call via asyncio.to_thread().
@@ -230,11 +418,20 @@ def render_display(
     the profile content - icon on the left; rating pill + class-rank
     badge (allowed to spill a bit past the nameplate's right edge) on
     top; name box + dan/course-rank badge below that; title capsule along
-    the bottom edge. The circle name renders as a separate ribbon label
-    directly beneath the nameplate box, outside of it. The title/trophy
-    banner has no image asset anywhere on the site (confirmed via
-    collection/trophy/'s DOM - it's CSS-styled text), so it's drawn as a
-    gradient capsule here, colored by `profile.title_tier` (e.g. "Gold").
+    the bottom edge. The circle's name banner renders directly beneath
+    the nameplate box, riding slightly over its bottom edge.
+
+    The title/trophy banner and the circle banner are both real SEGA
+    assets (`img/trophy_<tier>.png`, 268x25, and
+    `img/circle/profile/circle_profile_color_<class>.png`, 300x44) rather
+    than hand-drawn plaques. An earlier round concluded no title asset
+    existed, having swept collection/trophy/ for `<img>` tags - it's
+    actually a stylesheet `background-image` on `.trophy_block`, which is
+    why it was missed. Using the real art matters because both colors
+    change (with the account's title tier and the circle's class), so any
+    fixed palette here would silently go stale; both still fall back to a
+    drawn shape when the fetch fails.
+
     All image params are optional and degrade gracefully; `circle` may be
     `None` (account not in a Circle) and is simply skipped.
     """
@@ -280,119 +477,102 @@ def render_display(
     # Fixed max width, well clear of the small chibi lineup baked into
     # the nameplate art further right.
     row_b_y = NAMEPLATE_Y + ROW_B_Y
-    name_pad = 8
-    name_text_w = 170
-    name_badge_gap = 6
-    name_badge_w = 80
-    name_box_w = name_pad + name_text_w + name_badge_gap + name_badge_w + name_pad
     draw.rounded_rectangle(
-        [(CONTENT_X, row_b_y), (CONTENT_X + name_box_w, row_b_y + ROW_B_H)],
+        [(CONTENT_X, row_b_y), (CONTENT_X + NAME_BOX_W, row_b_y + ROW_B_H)],
         radius=6,
         fill=(255, 255, 255),
         outline=(200, 200, 200),
     )
     if profile.display_name:
-        _draw_tracked_text(
-            image,
+        _draw_monospaced_text(
             draw,
             profile.display_name,
             _JP_MEDIUM,
-            CONTENT_X + name_pad,
+            CONTENT_X + NAME_PAD_L,
             row_b_y,
-            name_text_w,
+            NAME_TEXT_W,
             ROW_B_H,
             (20, 20, 20),
-            font_h=round((ROW_B_H - 10) * 0.85),
-            min_tracking=0.55,
+            font_h=NAME_FONT_H,
+            pitch_ratio=NAME_PITCH_RATIO,
         )
     _paste_contain_left(
         image,
         course_rank_bytes,
-        CONTENT_X + name_pad + name_text_w + name_badge_gap,
+        CONTENT_X + NAME_PAD_L + NAME_TEXT_W + NAME_BADGE_GAP,
         row_b_y + ROW_B_H // 2,
-        name_badge_w,
+        NAME_BADGE_W,
         ROW_B_H - 6,
     )
 
-    # row C: title bar, along the very bottom edge of the nameplate,
-    # capsule (fully rounded ends) - no image asset exists for this
-    # anywhere on the site, so it's drawn. Narrower for the same reason
-    # as the name box, and the text is capped well under the bar's own
-    # height so it doesn't poke above/below the capsule into the
-    # background art.
+    # row C: title/trophy bar along the bottom edge of the nameplate. The
+    # real img/trophy_<tier>.png is 268x25, drawn here 1:1, with the site's
+    # own text treatment on top (white, 1px hard outline all round).
     row_c_y = NAMEPLATE_Y + ROW_C_Y
-    title_box_w = min(270, round(content_w * 0.58))
-    light_hex, mid_hex, dark_hex = _TIER_COLORS.get(profile.title_tier or "", _TIER_COLORS["Gold"])
-    capsule_radius = ROW_C_H // 2
-    draw.rounded_rectangle(
-        [(CONTENT_X, row_c_y), (CONTENT_X + title_box_w, row_c_y + ROW_C_H)],
-        radius=capsule_radius,
-        fill=_hex_to_rgb(dark_hex),
-    )
-    inset = 3
-    draw.rounded_rectangle(
-        [(CONTENT_X + inset, row_c_y + inset), (CONTENT_X + title_box_w - inset, row_c_y + ROW_C_H - inset)],
-        radius=max(capsule_radius - inset, 2),
-        fill=_hex_to_rgb(mid_hex),
-    )
+    if not _paste_plate(image, title_plate_bytes, (CONTENT_X, row_c_y), (TITLE_W, ROW_C_H)):
+        # asset unavailable - fall back to the drawn capsule, tinted by
+        # whatever tier the page reported.
+        _, mid_hex, dark_hex = _TIER_COLORS.get(profile.title_tier or "", _TIER_COLORS["Gold"])
+        capsule_radius = ROW_C_H // 2
+        draw.rounded_rectangle(
+            [(CONTENT_X, row_c_y), (CONTENT_X + TITLE_W, row_c_y + ROW_C_H)],
+            radius=capsule_radius,
+            fill=_hex_to_rgb(dark_hex),
+        )
+        inset = 3
+        draw.rounded_rectangle(
+            [(CONTENT_X + inset, row_c_y + inset), (CONTENT_X + TITLE_W - inset, row_c_y + ROW_C_H - inset)],
+            radius=max(capsule_radius - inset, 2),
+            fill=_hex_to_rgb(mid_hex),
+        )
     if profile.title:
-        _draw_tracked_text(
-            image,
+        _draw_outlined_text(
             draw,
             profile.title,
-            _JP_BOLD,
-            CONTENT_X + 12,
-            row_c_y,
-            title_box_w - 24,
-            ROW_C_H,
-            _hex_to_rgb(dark_hex),
-            center=True,
+            _JP_MEDIUM,
+            (CONTENT_X + 10, row_c_y, TITLE_W - 20, ROW_C_H),
+            (255, 255, 255),
+            (0, 0, 0),
+            stroke=1,
             font_h=ROW_C_H - 12,
         )
 
-    # circle ribbon - disabled for now, workin' on it.
-    # if circle is not None and circle.name:
-    #     ribbon_y = NAMEPLATE_Y + NAMEPLATE_H + RIBBON_GAP
-    #     body_x0 = NAMEPLATE_X + RIBBON_CHIP_W
-    #     body_x1 = NAMEPLATE_X + RIBBON_W
-    #     poly = _ribbon_polygon(body_x0, ribbon_y, body_x1, ribbon_y + RIBBON_H, RIBBON_NOTCH)
-    #     gradient = _diagonal_gradient(
-    #         (body_x1 - body_x0 + RIBBON_NOTCH, RIBBON_H), _hex_to_rgb(RIBBON_GRADIENT_1), _hex_to_rgb(RIBBON_GRADIENT_2)
-    #     ).convert("RGBA")
-    #     mask = Image.new("L", image.size, 0)
-    #     ImageDraw.Draw(mask).polygon(poly, fill=255)
-    #     gradient_layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
-    #     gradient_layer.paste(gradient, (body_x0 - RIBBON_NOTCH, ribbon_y))
-    #     image.paste(gradient_layer, (0, 0), mask)
-    #     draw.polygon(poly, outline=_hex_to_rgb(RIBBON_GRADIENT_1), width=2)
-    #
-    #     draw.rounded_rectangle(
-    #         [(NAMEPLATE_X, ribbon_y - 2), (NAMEPLATE_X + RIBBON_CHIP_W + RIBBON_NOTCH, ribbon_y + RIBBON_H + 2)],
-    #         radius=8,
-    #         fill=RIBBON_CHIP_COLOR,
-    #     )
-    #     glyph_cx, glyph_cy = NAMEPLATE_X + RIBBON_CHIP_W // 2, ribbon_y + RIBBON_H // 2
-    #     r = RIBBON_CHIP_W // 5
-    #     for dx in (-r, r):
-    #         draw.ellipse([(glyph_cx + dx - r, glyph_cy - r), (glyph_cx + dx + r, glyph_cy + r)], fill=(235, 240, 255))
-    #
-    #     # circle names on the real site already commonly end in their own
-    #     # "☆" (as this account's does) - only add the leading one here to
-    #     # avoid doubling up.
-    #     circle_label = f"☆{_truncate_to_width(draw, circle.name, FONT_RIBBON, body_x1 - body_x0 - 30)}"
-    #     label_w = draw.textlength(circle_label, font=FONT_RIBBON)
-    #     bbox = draw.textbbox((0, 0), circle_label, font=FONT_RIBBON)
-    #     label_h = bbox[3] - bbox[1]
-    #     text_x = body_x0 + (body_x1 - body_x0 - label_w) / 2
-    #     text_y = ribbon_y + (RIBBON_H - label_h) / 2 - bbox[1]
-    #     draw.text(
-    #         (text_x, text_y),
-    #         circle_label,
-    #         font=FONT_RIBBON,
-    #         fill=(255, 255, 255),
-    #         stroke_width=2,
-    #         stroke_fill=_hex_to_rgb(RIBBON_GRADIENT_1),
-    #     )
+    # circle banner: the real rank-colored name plate from the circle
+    # profile page, tucked under the nameplate the way the physical card
+    # overlaps it. Skipped entirely when the account is not in a circle.
+    if circle is not None and circle.name:
+        ribbon_x = CONTENT_X + RIBBON_X_OFFSET
+        ribbon_y = NAMEPLATE_Y + NAMEPLATE_H - RIBBON_Y_OVERLAP
+        # the banner starts where the chip ends (bar a few px of overlap),
+        # rather than running the full width underneath it - otherwise the
+        # chip swallows the banner art's own left-hand star.
+        body_x = ribbon_x + RIBBON_CHIP_W - RIBBON_CHIP_OVERLAP
+        body_w = RIBBON_W - RIBBON_CHIP_W + RIBBON_CHIP_OVERLAP
+        if not _paste_sliced_plate(
+            image, circle_color_bytes, (body_x, ribbon_y), (body_w, RIBBON_H), RIBBON_CAP_FRAC
+        ):
+            draw.rounded_rectangle(
+                [(body_x, ribbon_y), (body_x + body_w, ribbon_y + RIBBON_H)],
+                radius=6,
+                fill=(150, 84, 48),
+                outline=(255, 255, 255),
+                width=2,
+            )
+        _paste_circle_chip(image, draw, ribbon_x, ribbon_y, RIBBON_CHIP_W, RIBBON_H)
+        # the site prints the circle name over this banner in bold with a
+        # white outline - the banner art is busy enough that plain dark
+        # text on it is hard to read. Centred over the body only, so the
+        # chip doesn't push it off-centre.
+        _draw_outlined_text(
+            draw,
+            circle.name,
+            _JP_BOLD,
+            (body_x + 14, ribbon_y, body_w - 28, RIBBON_H),
+            (11, 56, 113),
+            (255, 255, 255),
+            stroke=1,
+            font_h=RIBBON_H - 13,
+        )
 
     image.save(output, "PNG", compress_level=3)
     output.seek(0)
@@ -422,30 +602,28 @@ def render_display_template(output) -> None:
     )
 
     row_b_y = NAMEPLATE_Y + ROW_B_Y
-    name_pad, name_text_w, name_badge_gap, name_badge_w = 8, 170, 6, 80
-    name_box_w = name_pad + name_text_w + name_badge_gap + name_badge_w + name_pad
-    _draw_guide_box(draw, (CONTENT_X, row_b_y, CONTENT_X + name_box_w, row_b_y + ROW_B_H), "NAME BOX")
+    name_text_x = CONTENT_X + NAME_PAD_L
+    badge_x = name_text_x + NAME_TEXT_W + NAME_BADGE_GAP
+    _draw_guide_box(draw, (CONTENT_X, row_b_y, CONTENT_X + NAME_BOX_W, row_b_y + ROW_B_H), "NAME BOX")
     _draw_guide_box(
         draw,
-        (CONTENT_X + name_pad, row_b_y, CONTENT_X + name_pad + name_text_w, row_b_y + ROW_B_H),
+        (name_text_x, row_b_y, name_text_x + NAME_TEXT_W, row_b_y + ROW_B_H),
         "PLAYER NAME",
         color=(0, 200, 255),
     )
     _draw_guide_box(
         draw,
-        (
-            CONTENT_X + name_pad + name_text_w + name_badge_gap,
-            row_b_y,
-            CONTENT_X + name_pad + name_text_w + name_badge_gap + name_badge_w,
-            row_b_y + ROW_B_H,
-        ),
+        (badge_x, row_b_y, badge_x + NAME_BADGE_W, row_b_y + ROW_B_H),
         "DAN/COURSE RANK BADGE",
         color=(0, 200, 255),
     )
 
     row_c_y = NAMEPLATE_Y + ROW_C_Y
-    title_box_w = min(270, round(content_w * 0.58))
-    _draw_guide_box(draw, (CONTENT_X, row_c_y, CONTENT_X + title_box_w, row_c_y + ROW_C_H), "TITLE CAPSULE")
+    _draw_guide_box(draw, (CONTENT_X, row_c_y, CONTENT_X + TITLE_W, row_c_y + ROW_C_H), "TITLE PLATE")
+
+    ribbon_x = CONTENT_X + RIBBON_X_OFFSET
+    ribbon_y = NAMEPLATE_Y + NAMEPLATE_H - RIBBON_Y_OVERLAP
+    _draw_guide_box(draw, (ribbon_x, ribbon_y, ribbon_x + RIBBON_W, ribbon_y + RIBBON_H), "CIRCLE BANNER")
 
     image.save(output, "PNG", compress_level=3)
     output.seek(0)

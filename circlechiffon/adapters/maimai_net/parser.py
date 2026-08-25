@@ -3,6 +3,7 @@ from datetime import datetime
 
 from selectolax.lexbor import LexborHTMLParser, LexborNode
 
+from circlechiffon.adapters.maimai_net import urls
 from circlechiffon.types import (
     ChartType,
     Circle,
@@ -14,6 +15,7 @@ from circlechiffon.types import (
     MissionEntry,
     MusicCountEntry,
     NoteTypeJudgement,
+    Photo,
     Profile,
     ProfileExtras,
     RecentScore,
@@ -38,20 +40,23 @@ _DIFFICULTY_MAP = {
     "remaster": Difficulty.remaster,
 }
 
+# markers confirmed live against real maimai DX NET score-list markup
+# (music_icon_<tier>.png) - a prior version of this list guessed wrong
+# filenames for the "+" tiers (e.g. "applus.png"/"fcplus.png") that never
+# matched anything on the real site, silently dropping AP+/FC+ combo badges
+# and FS+/FDX/FDX+ sync badges (only the un-plussed tiers happened to match,
+# since e.g. "fc.png" is coincidentally a substring of "music_icon_fc.png").
 _FLAG_MATCHERS: list[tuple[str, ComboFlag]] = [
-    ("applus.png", ComboFlag.app),
+    ("app.png", ComboFlag.app),
     ("ap.png", ComboFlag.ap),
-    ("fcplus.png", ComboFlag.fcp),
+    ("fcp.png", ComboFlag.fcp),
     ("fc.png", ComboFlag.fc),
 ]
 
-# most-specific first isn't actually required here (the ".png" suffix makes
-# these filename markers mutually exclusive as substrings of each other),
-# but ordered from most to least specific for clarity anyway
 _SYNC_MATCHERS: list[tuple[str, SyncFlag]] = [
-    ("fsdplus.png", SyncFlag.fsdp),
-    ("fsd.png", SyncFlag.fsd),
-    ("fsplus.png", SyncFlag.fsp),
+    ("fdxp.png", SyncFlag.fsdp),
+    ("fdx.png", SyncFlag.fsd),
+    ("fsp.png", SyncFlag.fsp),
     ("fs.png", SyncFlag.fs),
     ("sync.png", SyncFlag.sync),
 ]
@@ -238,6 +243,57 @@ def parse_music_records(html: str) -> list[Score]:
     return results
 
 
+def parse_photos(html: str) -> list[Photo]:
+    """Parses playerData/photo/ (the in-game "Album") - confirmed live
+    this session. Each photo is one `div.m_10.p_5.f_0` block: title in
+    `.black_block`, the "YYYY/MM/DD HH:MM" timestamp in `.block_info`
+    (same format `_parse_played_at` already handles), chart type/
+    difficulty via the same icon-filename convention as
+    `parse_music_records` (`.music_kind_icon` / a diff icon - `h_16.f_l`
+    here rather than `h_20.f_l`, but `_classify_type_and_difficulty`
+    only cares about the filename), and the venue name in the second
+    `.col2`'s `.see_through_block`. The photo itself is `img.w_430`'s
+    `src` - skip the block entirely if that's missing, since without an
+    image there's nothing to show; every other field degrades to None."""
+    tree = LexborHTMLParser(html)
+    results: list[Photo] = []
+
+    for block in tree.css(".m_10.p_5.f_0"):
+        image_node = block.css_first("img.w_430")
+        image_url = image_node.attributes.get("src") if image_node is not None else None
+        if not image_url:
+            continue
+
+        title_node = block.css_first(".black_block")
+        title = title_node.text(strip=True) if title_node is not None else None
+
+        date_node = block.css_first(".block_info")
+        played_at = _parse_played_at(date_node.text() if date_node is not None else None)
+
+        type_icon = block.css_first(".music_kind_icon")
+        diff_icon = block.css_first(".h_16.f_l")
+        chart_type, difficulty = _classify_type_and_difficulty(
+            type_icon.attributes.get("src") if type_icon else None,
+            diff_icon.attributes.get("src") if diff_icon else None,
+        )
+
+        venue_node = block.css_first(".col2.f_r .see_through_block")
+        venue = venue_node.text(strip=True) if venue_node is not None else None
+
+        results.append(
+            Photo(
+                image_url=image_url,
+                title=title,
+                difficulty=difficulty,
+                chart_type=chart_type,
+                played_at=played_at,
+                venue=venue,
+            )
+        )
+
+    return results
+
+
 def parse_song_play_stats(html: str) -> dict[Difficulty, SongPlayStats]:
     """Parses maimai DX NET's musicDetail page (confirmed live: reached via
     the idx captured off a score row in parse_music_records) - one fetch
@@ -336,6 +392,13 @@ def _extract_profile_fields(scope: LexborHTMLParser | LexborNode) -> dict:
                 title_tier = cls.removeprefix("trophy_")
                 break
 
+    # the banner graphic itself is a stylesheet-level `background-image` on
+    # .trophy_block (not an inline style, and not an <img>), so it can't be
+    # read out of the page markup - but the filename is a pure function of
+    # the tier class above, verified live for Normal/Bronze/Silver/Gold/
+    # Rainbow (all 268x25 PNGs).
+    title_plate_url = urls.trophy_plate_url(title_tier)
+
     # confirmed live: the player's icon is the first img.w_112.f_l directly
     # inside .basic_block - the previously-guessed .friend_block_icon class
     # doesn't exist anywhere in the real markup.
@@ -405,6 +468,15 @@ def parse_profile(html: str) -> Profile:
 
     return Profile(
         **fields,
+        display_name=display_name,
+        rating=rating,
+        title=title,
+        title_tier=title_tier,
+        title_plate_url=title_plate_url,
+        icon_url=icon_url,
+        course_rank_url=course_rank_url,
+        class_rank_url=class_rank_url,
+        rating_badge_url=rating_badge_url,
         current_version_plays=current_version_plays,
         total_plays=total_plays,
         music_counts=music_counts,
@@ -769,6 +841,12 @@ def parse_circle(html: str) -> Circle | None:
         if m:
             rank_this_month = _parse_int(m.group(1))
 
+    # .circle_profile_class holds the rank-colored banner the circle's name
+    # is printed over on the real page - confirmed live this session
+    # (img/circle/profile/circle_profile_color_bronze.png, 300x44).
+    color_node = tree.css_first(".circle_profile_class img")
+    color_url = color_node.attributes.get("src") if color_node is not None else None
+
     return Circle(
         name=name,
         code=code,
@@ -777,6 +855,7 @@ def parse_circle(html: str) -> Circle | None:
         tags=tags,
         points_this_month=points_this_month,
         rank_this_month=rank_this_month,
+        color_url=color_url,
     )
 
 

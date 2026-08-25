@@ -152,11 +152,15 @@ class ProfileCog(commands.Cog):
                     return None
 
             # All of these are independent of each other, so fetch them
-            # concurrently instead of paying round-trip latency 7x
-            # sequentially.
+            # concurrently instead of paying round-trip latency 9x
+            # sequentially. title_plate/circle_color are the real SEGA art
+            # for the title bar and the circle's name banner - both are
+            # colored by tier/class, so the card uses the actual asset
+            # rather than a palette that would drift (see render_display).
             (
                 icon_bytes, course_rank_bytes, class_rank_bytes, rating_badge_bytes,
                 nameplate_bytes, frame_bytes, tour_member_bytes,
+                title_plate_bytes, circle_color_bytes,
             ) = await asyncio.gather(
                 image_or_none(profile.icon_url),
                 image_or_none(profile.course_rank_url),
@@ -165,17 +169,21 @@ class ProfileCog(commands.Cog):
                 equipped_image_or_none(client.get_equipped_nameplate_url()),
                 equipped_image_or_none(client.get_equipped_frame_url()),
                 equipped_image_or_none(client.get_leader_tour_member_url()),
+                image_or_none(profile.title_plate_url),
+                image_or_none(circle.color_url if circle is not None else None),
             )
 
             return (
                 profile, circle, icon_bytes, course_rank_bytes, class_rank_bytes, rating_badge_bytes,
                 nameplate_bytes, frame_bytes, tour_member_bytes,
+                title_plate_bytes, circle_color_bytes,
             )
 
         try:
             (
                 profile, circle, icon_bytes, course_rank_bytes, class_rank_bytes, rating_badge_bytes,
                 nameplate_bytes, frame_bytes, tour_member_bytes,
+                title_plate_bytes, circle_color_bytes,
             ) = await accounts.with_client(
                 interaction.user.id, fetch, on_retry=accounts.default_retry_notice(interaction)
             )
@@ -193,6 +201,8 @@ class ProfileCog(commands.Cog):
                 nameplate_bytes=nameplate_bytes,
                 frame_bytes=frame_bytes,
                 tour_member_bytes=tour_member_bytes,
+                title_plate_bytes=title_plate_bytes,
+                circle_color_bytes=circle_color_bytes,
                 output=buf,
             )
 

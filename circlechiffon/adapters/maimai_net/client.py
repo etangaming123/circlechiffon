@@ -25,6 +25,7 @@ from circlechiffon.adapters.maimai_net.parser import (
     parse_friend_list,
     parse_friend_scores,
     parse_music_records,
+    parse_photos,
     parse_profile,
     parse_profile_extras,
     parse_recent_records,
@@ -37,6 +38,7 @@ from circlechiffon.types import (
     Difficulty,
     FriendEntry,
     Judgements,
+    Photo,
     Profile,
     ProfileExtras,
     RecentScore,
@@ -266,6 +268,14 @@ class MaimaiNetClient:
     async def get_circle(self) -> Circle | None:
         html = await self._get_page(urls.INTL["CIRCLE_PAGE"])
         return parse_circle(html)
+
+    async def get_photos(self) -> list[Photo]:
+        """The in-game "Album" - unguarded, unlike get_circle_members():
+        for /cc-album the photo list *is* the whole point of the command,
+        so a fetch failure should surface as an error rather than
+        silently render an empty album."""
+        html = await self._get_page(urls.INTL["PHOTO_PAGE"])
+        return parse_photos(html)
 
     async def get_circle_members(self) -> list[CircleMember]:
         """Best-effort - see parser.parse_circle_members's docstring. A

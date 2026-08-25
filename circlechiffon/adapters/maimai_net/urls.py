@@ -10,6 +10,7 @@ INTL = {
     "LOGIN_OTP_ENDPOINT": "https://lng-tgk-aime-gw.am-all.net/common_auth/login/otpauth",
     "HOME_PAGE": "https://maimaidx-eng.com/maimai-mobile/home/",
     "PLAYER_DATA_PAGE": "https://maimaidx-eng.com/maimai-mobile/playerData/",
+    "PHOTO_PAGE": "https://maimaidx-eng.com/maimai-mobile/playerData/photo/",
     "RECORD_RECENT_PAGE": "https://maimaidx-eng.com/maimai-mobile/record",
     "RECORD_MUSICS_PAGE": "https://maimaidx-eng.com/maimai-mobile/record/musicGenre/search/",
     "RECORD_DETAIL_PAGE": "https://maimaidx-eng.com/maimai-mobile/record/playlogDetail/",
@@ -27,6 +28,25 @@ INTL = {
     # from FRIEND_SCORE_DIFF_VALUES.
     "FRIEND_SCORE_PAGE": "https://maimaidx-eng.com/maimai-mobile/friend/friendGenreVs/battleStart/?scoreType=2&genre=99",
 }
+
+IMG_BASE = "https://maimaidx-eng.com/maimai-mobile/img/"
+
+# .trophy_block's title banner is a stylesheet-level `background-image`
+# rather than an <img>, so it can't be scraped out of the page markup -
+# but its filename is a pure function of the tier modifier class on that
+# block. Verified live: normal/bronze/silver/gold/rainbow all resolve to
+# 268x25 PNGs.
+_TROPHY_TIERS = {"normal", "bronze", "silver", "gold", "rainbow"}
+
+
+def trophy_plate_url(title_tier: str | None) -> str | None:
+    if not title_tier:
+        return None
+    tier = title_tier.strip().lower()
+    if tier not in _TROPHY_TIERS:
+        return None
+    return f"{IMG_BASE}trophy_{tier}.png"
+
 
 ERROR_PAGES = [
     "https://maimaidx-eng.com/maimai-mobile/error/",
