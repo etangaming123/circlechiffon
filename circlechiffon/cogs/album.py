@@ -10,7 +10,7 @@ from circlechiffon.adapters.maimai_net.errors import MaimaiNetError, SessionExpi
 from circlechiffon.types import Photo
 
 
-def _photo_embed(photo: Photo, index: int, total: int, has_image: bool) -> discord.Embed:
+def _photo_embed(photo: Photo, index: int, total: int, has_image: bool, hide_location: bool) -> discord.Embed:
     embed = discord.Embed(
         title=photo.title or "Untitled",
         color=embed_colors.difficulty_color(photo.difficulty),
@@ -27,7 +27,7 @@ def _photo_embed(photo: Photo, index: int, total: int, has_image: bool) -> disco
     else:
         embed.description = (embed.description + "\n" if embed.description else "") + "*(photo failed to load)*"
     footer = f"Photo {index + 1}/{total}"
-    if photo.venue:
+    if photo.venue and not hide_location:
         footer += f" · {photo.venue}"
     embed.set_footer(text=footer)
     if photo.played_at is not None:
@@ -50,11 +50,14 @@ class AlbumView(discord.ui.View):
     each render (same reasoning as RecentScoresView.current_embeds_and_files
     in cogs/records.py)."""
 
-    def __init__(self, invoker_id: int, photos: list[Photo], image_bytes: list[bytes | None]):
+    def __init__(
+        self, invoker_id: int, photos: list[Photo], image_bytes: list[bytes | None], hide_location: bool
+    ):
         super().__init__(timeout=30)
         self.invoker_id = invoker_id
         self.photos = photos
         self.image_bytes = image_bytes
+        self.hide_location = hide_location
         self.index = 0
         self.message: discord.InteractionMessage | None = None
         self._update_buttons()
@@ -66,7 +69,13 @@ class AlbumView(discord.ui.View):
     def embed_and_file(self) -> tuple[discord.Embed, discord.File | None]:
         raw = self.image_bytes[self.index]
         file = discord.File(io.BytesIO(raw), filename="photo.jpg") if raw else None
-        embed = _photo_embed(self.photos[self.index], self.index, len(self.photos), has_image=file is not None)
+        embed = _photo_embed(
+            self.photos[self.index],
+            self.index,
+            len(self.photos),
+            has_image=file is not None,
+            hide_location=self.hide_location,
+        )
         return embed, file
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -106,9 +115,10 @@ class AlbumCog(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="cc-album", description="Browse your maimai DX NET photo album")
+    @app_commands.describe(hide_location="Hide the arcade/venue name in each photo's footer (default: on)")
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-    async def album(self, interaction: discord.Interaction):
+    async def album(self, interaction: discord.Interaction, hide_location: bool = True):
         if not await access.handle_command_access(interaction, interaction.user.id, "cc-album", access.MAIMAI_NET_COOLDOWN):
             return
         await interaction.response.defer()
@@ -127,7 +137,7 @@ class AlbumCog(commands.Cog):
                 await interaction.edit_original_response(content="No photos in your album yet.")
                 return
 
-            view = AlbumView(interaction.user.id, photos, image_bytes)
+            view = AlbumView(interaction.user.id, photos, image_bytes, hide_location)
             embed, file = view.embed_and_file()
             message = await interaction.edit_original_response(
                 content=None, embed=embed, view=view, attachments=[file] if file else []
