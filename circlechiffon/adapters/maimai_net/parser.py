@@ -10,6 +10,7 @@ from circlechiffon.types import (
     CircleMember,
     ComboFlag,
     Difficulty,
+    FriendEntry,
     Judgements,
     MissionEntry,
     MusicCountEntry,
@@ -355,23 +356,24 @@ def _parse_int(text: str | None) -> int | None:
     return int(digits) if digits else None
 
 
-def parse_profile(html: str) -> Profile:
-    """Parses maimai DX NET's Player's Data page (confirmed live against a
-    real account this session - same header markup as the home page, plus
-    play-count stats home doesn't have)."""
-    tree = LexborHTMLParser(html)
-
-    name_node = tree.css_first(".name_block")
+def _extract_profile_fields(scope: LexborHTMLParser | LexborNode) -> dict:
+    """Extracts the profile-card fields shared by every page that renders
+    this markup: Player's Data (own profile), and - confirmed live this
+    session - the friend list row and friend detail page too (SEGA reuses
+    the exact same card partial for all three). `scope` is whatever node
+    contains one such card - the whole tree for the own-profile page, or a
+    single row/container node for a friend."""
+    name_node = scope.css_first(".name_block")
     display_name = name_node.text(strip=True) if name_node is not None else "(unknown)"
 
     rating = None
     rating_badge_url = None
-    rating_node = tree.css_first(".rating_block")
+    rating_node = scope.css_first(".rating_block")
     if rating_node is not None:
         digits = re.sub(r"\D", "", rating_node.text(strip=True))
         if digits:
             rating = int(digits)
-        # the rating pill's background (e.g. rating_base_rainbow.png) is a
+        # the rating pill's background (e.g. rating_base_purple.png) is a
         # sibling img right before .rating_block, not baked into any text -
         # its filename already reflects the correct rating-tier color SEGA's
         # own page computed, so no need to re-derive the tier ourselves.
@@ -379,11 +381,11 @@ def parse_profile(html: str) -> Profile:
             bg_node = rating_node.parent.css_first("img")
             rating_badge_url = bg_node.attributes.get("src") if bg_node is not None else None
 
-    title_node = tree.css_first(".trophy_block .trophy_inner_block")
+    title_node = scope.css_first(".trophy_block .trophy_inner_block")
     title = title_node.text(strip=True) if title_node is not None else None
 
     title_tier = None
-    trophy_block_node = tree.css_first(".trophy_block")
+    trophy_block_node = scope.css_first(".trophy_block")
     if trophy_block_node is not None:
         for cls in (trophy_block_node.attributes.get("class") or "").split():
             if cls.startswith("trophy_") and cls != "trophy_block" and cls != "trophy_inner_block":
@@ -400,16 +402,45 @@ def parse_profile(html: str) -> Profile:
     # confirmed live: the player's icon is the first img.w_112.f_l directly
     # inside .basic_block - the previously-guessed .friend_block_icon class
     # doesn't exist anywhere in the real markup.
-    icon_node = tree.css_first(".basic_block > img.w_112.f_l")
+    icon_node = scope.css_first(".basic_block > img.w_112.f_l")
     icon_url = icon_node.attributes.get("src") if icon_node is not None else None
 
     # dan (course-rank) and class-rank badges are pure images with
     # hash-coded filenames on the real page - no text/alt anywhere - so
     # these are the only representation available at all.
-    course_rank_node = tree.css_first("img.h_35.f_l")
+    course_rank_node = scope.css_first("img.h_35.f_l")
     course_rank_url = course_rank_node.attributes.get("src") if course_rank_node is not None else None
-    class_rank_node = tree.css_first("img.p_l_10.h_35.f_l")
+    class_rank_node = scope.css_first("img.p_l_10.h_35.f_l")
     class_rank_url = class_rank_node.attributes.get("src") if class_rank_node is not None else None
+
+    # the star-count div (confirmed live) contains only the icon and its
+    # "×NNN" text - safe to read the whole parent's text.
+    star_count = None
+    star_icon_node = scope.css_first('img[src*="icon_star"]')
+    if star_icon_node is not None and star_icon_node.parent is not None:
+        m = _STAR_COUNT_RE.search(star_icon_node.parent.text())
+        if m:
+            star_count = _parse_int(m.group(1))
+
+    return {
+        "display_name": display_name,
+        "rating": rating,
+        "title": title,
+        "title_tier": title_tier,
+        "icon_url": icon_url,
+        "course_rank_url": course_rank_url,
+        "class_rank_url": class_rank_url,
+        "rating_badge_url": rating_badge_url,
+        "star_count": star_count,
+    }
+
+
+def parse_profile(html: str) -> Profile:
+    """Parses maimai DX NET's Player's Data page (confirmed live against a
+    real account this session - same header markup as the home page, plus
+    play-count stats home doesn't have)."""
+    tree = LexborHTMLParser(html)
+    fields = _extract_profile_fields(tree)
 
     page_text = tree.body.text() if tree.body is not None else ""
     current_version_plays = None
@@ -420,15 +451,6 @@ def parse_profile(html: str) -> Profile:
     m = _TOTAL_PLAY_COUNT_RE.search(page_text)
     if m:
         total_plays = _parse_int(m.group(1))
-
-    # the star-count div (confirmed live) contains only the icon and its
-    # "×NNN" text - safe to read the whole parent's text.
-    star_count = None
-    star_icon_node = tree.css_first('img[src*="icon_star"]')
-    if star_icon_node is not None and star_icon_node.parent is not None:
-        m = _STAR_COUNT_RE.search(star_icon_node.parent.text())
-        if m:
-            star_count = _parse_int(m.group(1))
 
     music_counts: list[MusicCountEntry] = []
     for block in tree.css(".musiccount_block"):
@@ -445,6 +467,7 @@ def parse_profile(html: str) -> Profile:
         music_counts.append(MusicCountEntry(category=category, tag=tag, earned=earned, total=total))
 
     return Profile(
+        **fields,
         display_name=display_name,
         rating=rating,
         title=title,
@@ -456,9 +479,137 @@ def parse_profile(html: str) -> Profile:
         rating_badge_url=rating_badge_url,
         current_version_plays=current_version_plays,
         total_plays=total_plays,
-        star_count=star_count,
         music_counts=music_counts,
     )
+
+
+def parse_friend_list(html: str) -> list[FriendEntry]:
+    """Parses /friend/ (confirmed live this session). Each friend is a row
+    rooted at img.friend_favorite_icon's parent div, reusing the same
+    profile-card partial _extract_profile_fields already handles, plus a
+    hidden idx (the id every friend sub-page is addressed by - never shown
+    to the user anywhere on SEGA's own UI) and an optional comment."""
+    tree = LexborHTMLParser(html)
+    entries: list[FriendEntry] = []
+    for icon in tree.css("img.friend_favorite_icon"):
+        row = icon.parent
+        if row is None:
+            continue
+        idx_node = row.css_first("input[name=idx]")
+        idx = idx_node.attributes.get("value") if idx_node is not None else None
+        if not idx:
+            continue
+        comment_node = row.css_first(".friend_comment_block")
+        comment = comment_node.text(strip=True) if comment_node is not None else None
+        entries.append(FriendEntry(profile=Profile(**_extract_profile_fields(row)), idx=idx, comment=comment or None))
+    return entries
+
+
+def parse_friend_detail(html: str, idx: str) -> FriendEntry | None:
+    """Parses /friend/friendDetail/?idx=... (confirmed live this session) -
+    same profile-card partial as parse_friend_list's rows, rooted at
+    .see_through_block, plus a .comment_block (note: different class than
+    the list page's .friend_comment_block)."""
+    tree = LexborHTMLParser(html)
+    scope = tree.css_first(".see_through_block")
+    if scope is None:
+        return None
+    comment_node = scope.css_first(".comment_block")
+    comment = comment_node.text(strip=True) if comment_node is not None else None
+    return FriendEntry(profile=Profile(**_extract_profile_fields(scope)), idx=idx, comment=comment or None)
+
+
+# confirmed live this session against the friendGenreVs/battleStart page:
+# the friend-side <td> of a score row's second <tr> has 3 <img>s - sync
+# status, combo status, achievement-rank letter (the letter isn't parsed,
+# Score has no field for it) - using the exact same music_icon_* filename
+# stems as _MUSIC_COUNT_STEM_MAP, so that map is reused here rather than
+# duplicated; only the tag->enum spelling differs (badge_icons.py's
+# fdx/fdxp note). Classified by _icon_stem()+category, not img position,
+# since "which slot is which" turned out less reliable to hardcode than
+# just reusing the existing stem->category map for every img in the cell.
+_SYNC_TAG_TO_FLAG = {
+    "sync": SyncFlag.sync,
+    "fs": SyncFlag.fs,
+    "fsp": SyncFlag.fsp,
+    "fdx": SyncFlag.fsd,
+    "fdxp": SyncFlag.fsdp,
+}
+_COMBO_TAG_TO_FLAG = {
+    "fc": ComboFlag.fc,
+    "fcp": ComboFlag.fcp,
+    "ap": ComboFlag.ap,
+    "app": ComboFlag.app,
+}
+
+
+def _extract_friend_flags(cell: LexborNode | None) -> tuple[ComboFlag | None, SyncFlag | None]:
+    if cell is None:
+        return None, None
+    combo_flag: ComboFlag | None = None
+    sync_flag: SyncFlag | None = None
+    for img in cell.css("img"):
+        mapping = _MUSIC_COUNT_STEM_MAP.get(_icon_stem(img) or "")
+        if mapping is None:
+            continue
+        category, tag = mapping
+        if category == "sync" and sync_flag is None:
+            sync_flag = _SYNC_TAG_TO_FLAG.get(tag)
+        elif category == "combo" and combo_flag is None:
+            combo_flag = _COMBO_TAG_TO_FLAG.get(tag)
+    return combo_flag, sync_flag
+
+
+def parse_friend_scores(html: str, difficulty: Difficulty) -> list[Score]:
+    """Parses one difficulty's page of /friend/friendGenreVs/battleStart/
+    (confirmed live this session, scoreType=2&genre=99). Rows share
+    .main_wrapper.t_c .m_15 with the page's genre-header separator rows
+    (class screw_block, skipped - genre itself isn't needed on Score) and
+    aren't the same markup as parse_music_records' own-score rows (w_450
+    m_15 p_3 f_0 here vs w_450 m_15 p_r f_0 there). Achievement of "0" or
+    "― %" means unplayed, skipped. difficulty is passed in rather than
+    derived from the row, since the caller already knows which of the 5
+    per-difficulty pages it fetched."""
+    tree = LexborHTMLParser(html)
+    results: list[Score] = []
+
+    for row in tree.css(".main_wrapper.t_c .m_15"):
+        classes = set((row.attributes.get("class") or "").split())
+        if not {"w_450", "m_15", "p_3", "f_0"}.issubset(classes):
+            continue
+
+        title_node = row.css_first(".music_name_block")
+        title = title_node.text(strip=True) if title_node is not None else None
+        if not title:
+            continue
+
+        achievement_node = row.css_first("td.w_120.f_b:last-child")
+        achievement_text = achievement_node.text(strip=True) if achievement_node is not None else None
+        if not achievement_text or achievement_text in ("0", "― %"):
+            continue
+        achievement = _parse_achievement(achievement_text)
+
+        type_icon = row.css_first(".music_kind_icon")
+        chart_type, _ = _classify_type_and_difficulty(
+            type_icon.attributes.get("src") if type_icon else None, None
+        )
+
+        second_row_cells = row.css("table tbody tr:last-child td")
+        friend_cell = second_row_cells[-1] if second_row_cells else None
+        combo_flag, sync_flag = _extract_friend_flags(friend_cell)
+
+        results.append(
+            Score(
+                title=title,
+                difficulty=difficulty,
+                chart_type=chart_type,
+                achievement=achievement,
+                combo_flag=combo_flag,
+                sync_flag=sync_flag,
+            )
+        )
+
+    return results
 
 
 def parse_profile_extras(html: str) -> ProfileExtras:

@@ -220,6 +220,20 @@ class ProfileExtras:
 
 
 @dataclass(slots=True, kw_only=True)
+class FriendEntry:
+    """A friend row from /friend/ or /friend/friendDetail/ - confirmed live
+    to be the same profile-card markup as Player's Data, so it wraps a
+    (partial) Profile rather than duplicating its fields. `idx` is the
+    hidden form value every friend sub-page (detail, friendGenreVs) is
+    addressed by; SEGA never exposes it as a visible "friend code" anywhere
+    on the page, it's just baked into these URLs."""
+
+    profile: Profile
+    idx: str
+    comment: str | None = None
+
+
+@dataclass(slots=True, kw_only=True)
 class CircleMember:
     name: str
     points: int | None = None

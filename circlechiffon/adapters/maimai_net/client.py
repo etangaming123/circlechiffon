@@ -21,6 +21,9 @@ from circlechiffon.adapters.maimai_net.parser import (
     parse_circle,
     parse_circle_members,
     parse_equipped_collection_image,
+    parse_friend_detail,
+    parse_friend_list,
+    parse_friend_scores,
     parse_music_records,
     parse_photos,
     parse_profile,
@@ -33,6 +36,7 @@ from circlechiffon.types import (
     Circle,
     CircleMember,
     Difficulty,
+    FriendEntry,
     Judgements,
     Photo,
     Profile,
@@ -346,6 +350,71 @@ class MaimaiNetClient:
         except MaimaiNetError:
             return {}
         return parse_song_play_stats(html)
+
+    async def get_friend_list(self) -> list[FriendEntry]:
+        """Confirmed live: /friend/ lists every friend as a profile-card row
+        (same markup as Player's Data), each addressed by a hidden idx that
+        every friend sub-page below needs. SEGA never shows this idx as a
+        user-facing "friend code" anywhere - it's purely an internal id."""
+        html = await self._get_page(urls.INTL["FRIEND_LIST_PAGE"])
+        return parse_friend_list(html)
+
+    async def get_friend_profile(self, idx: str) -> FriendEntry | None:
+        """Confirmed live: /friend/friendDetail/?idx=... - same profile card
+        as get_friend_list()'s rows, one friend at a time. Returns None if
+        the idx doesn't resolve to a friend (e.g. stale idx, no longer
+        friends)."""
+        html = await self._get_page(f"{urls.INTL['FRIEND_DETAIL_PAGE']}?idx={idx}")
+        return parse_friend_detail(html, idx)
+
+    async def get_friend_scores(
+        self,
+        idx: str,
+        on_progress: Callable[[str], Awaitable[None]] | None = None,
+    ) -> list[Score]:
+        """Fetch a friend's achievement/combo/sync per difficulty (confirmed
+        live against /friend/friendGenreVs/battleStart/ - BASIC..Re:MASTER,
+        no UTAGE, same concurrent-fetch-then-fixed-order-await shape as
+        get_music_scores()). No raw DX score is obtainable for a friend (see
+        urls.py's FRIEND_SCORE_PAGE comment), only achievement - enough for
+        calculate_best50/calculate_rating, which is all this is for.
+
+        SEGA appears to only return data here for friends the account has
+        marked as a Favorite on the friend list - a friend who isn't
+        favorited comes back with every difficulty empty, same as a friend
+        who's genuinely never played; callers can't tell those apart from
+        an empty result alone."""
+        diff_labels = {v: urls.MUSIC_RECORD_DIFF_LABELS[v] for v in urls.FRIEND_SCORE_DIFF_VALUES}
+        # same 0..4 mapping as MUSIC_RECORD_DIFF_LABELS, just as Difficulty
+        # members instead of display strings (there's no UTAGE case here).
+        diff_values_to_difficulty = {
+            0: Difficulty.basic,
+            1: Difficulty.advanced,
+            2: Difficulty.expert,
+            3: Difficulty.master,
+            4: Difficulty.remaster,
+        }
+
+        async def fetch(diff_value: int) -> list[Score]:
+            difficulty = diff_values_to_difficulty[diff_value]
+            url = f"{urls.INTL['FRIEND_SCORE_PAGE']}&diff={diff_value}&idx={idx}"
+            html = await self._get_page(url)
+            return parse_friend_scores(html, difficulty)
+
+        tasks = [asyncio.create_task(fetch(v)) for v in urls.FRIEND_SCORE_DIFF_VALUES]
+        all_scores: list[Score] = []
+        try:
+            for diff_value, task in zip(urls.FRIEND_SCORE_DIFF_VALUES, tasks):
+                scores = await task
+                if on_progress is not None:
+                    await on_progress(diff_labels[diff_value])
+                all_scores.extend(scores)
+        except BaseException:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
+        return all_scores
 
     async def get_recent_score_detail(self, idx: str) -> Judgements | None:
         """Best-effort fetch of a single play's judgment-count breakdown.

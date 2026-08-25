@@ -20,6 +20,13 @@ INTL = {
     "NAMEPLATE_PAGE": "https://maimaidx-eng.com/maimai-mobile/collection/nameplate/",
     "FRAME_PAGE": "https://maimaidx-eng.com/maimai-mobile/collection/frame/",
     "TOUR_MEMBER_PAGE": "https://maimaidx-eng.com/maimai-mobile/collection/character/",
+    "FRIEND_LIST_PAGE": "https://maimaidx-eng.com/maimai-mobile/friend/",
+    "FRIEND_DETAIL_PAGE": "https://maimaidx-eng.com/maimai-mobile/friend/friendDetail/",
+    # confirmed live: scoreType=2 is the achievement view (scoreType=1 shows
+    # a DX-star icon instead but never the raw DX score number - not useful
+    # here); genre=99 is "All genre" in one page; diff is appended by caller
+    # from FRIEND_SCORE_DIFF_VALUES.
+    "FRIEND_SCORE_PAGE": "https://maimaidx-eng.com/maimai-mobile/friend/friendGenreVs/battleStart/?scoreType=2&genre=99",
 }
 
 IMG_BASE = "https://maimaidx-eng.com/maimai-mobile/img/"
@@ -63,3 +70,8 @@ MUSIC_RECORD_DIFF_LABELS = {
     4: "Re:MASTER",
     UTAGE_DIFF_VALUE: "UTAGE",
 }
+
+# friend/friendGenreVs uses the same 0..4 diff values as record/musicGenre
+# (confirmed live), but UTAGE isn't fetched for friends - matches
+# get_music_scores(include_utage=False), the same default /cc-best uses.
+FRIEND_SCORE_DIFF_VALUES = [4, 3, 2, 1, 0]
