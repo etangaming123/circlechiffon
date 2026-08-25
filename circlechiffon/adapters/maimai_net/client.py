@@ -324,9 +324,21 @@ class MaimaiNetClient:
                     # whatever per-session page state DX NET wedged on.
                     # Best-effort - a failure here must not mask `last`.
                     try:
-                        await self._get(urls.INTL["HOME_PAGE"])
+                        home_resp = await self._get(urls.INTL["HOME_PAGE"])
                     except (httpx.HTTPError, MaimaiNetError):
                         pass
+                    else:
+                        # Home bouncing us out is unambiguous in a way 200002
+                        # is not: the session is gone, not wedged. Confirmed
+                        # live against a genuinely dead cookie, where /home/
+                        # 302s to the bare landing page. Stop here rather
+                        # than spending a final attempt that cannot succeed.
+                        if home_resp.is_redirect:
+                            location = home_resp.url.join(home_resp.headers.get("location") or "")
+                            if urls.is_landing_page_url(location) or "common_auth" in str(location):
+                                raise SessionExpired(
+                                    "Your maimai DX NET session has expired. Please /cc-login again."
+                                ) from last
             try:
                 return await self._fetch_page(url)
             except TransientNetError as e:
