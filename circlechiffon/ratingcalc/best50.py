@@ -68,8 +68,14 @@ def calculate_best50(scores: list[Score], catalog: SongCatalog, *, next_update_p
         else:
             older_entries.append(entry)
 
-    current_entries.sort(key=lambda e: e.rating, reverse=True)
-    older_entries.sort(key=lambda e: e.rating, reverse=True)
+    # Rating first, then achievement as the tiebreak - the rating formula
+    # floors to an int, so plenty of distinct achievements collapse onto the
+    # same rating, and without the second key their order falls out of
+    # whatever order client.get_music_scores() happened to return. Ties also
+    # decide which entries make the cut at the 15/35 boundary, not just how
+    # they're displayed.
+    current_entries.sort(key=lambda e: (e.rating, e.score.achievement), reverse=True)
+    older_entries.sort(key=lambda e: (e.rating, e.score.achievement), reverse=True)
 
     b15 = current_entries[:15]
     b35 = older_entries[:35]
