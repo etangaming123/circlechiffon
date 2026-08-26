@@ -524,16 +524,19 @@ async def _capture(
 
         end = None if to_measure is None else max(start_measure, int(to_measure))
         # The measure count is only known once the chart has parsed, which is
-        # why this is decided here rather than by the caller. Measure the
-        # *rendered span*, not the whole chart: a from/to range would
-        # otherwise be given the full chart's duration, which both understates
-        # progress and starves the encoder of bitrate.
-        span_measures = (end if end is not None else total_measures) - start_measure
-        expected_seconds = estimate_duration(span_measures, bpm)
-        bitrate = _bitrate_for(expected_seconds, size_budget_bytes)
+        # why the bitrate is decided here rather than by the caller. It's
+        # sized to the *rendered span*, not the whole chart - a from/to range
+        # given the full chart's duration would starve the encoder.
+        #
+        # A rough beats-based estimate is fine for this: it only picks a
+        # starting bitrate, and encode_capture re-encodes anyway if the result
+        # overshoots the upload budget. Progress reporting deliberately does
+        # not use it - see _watch_progress.
+        end_measure = end if end is not None else total_measures
+        bitrate = _bitrate_for(estimate_duration(end_measure - start_measure, bpm), size_budget_bytes)
 
         watcher = (
-            asyncio.create_task(_watch_progress(page, progress, expected_seconds))
+            asyncio.create_task(_watch_progress(page, progress, start_measure, end_measure))
             if progress else None
         )
         try:
@@ -606,14 +609,40 @@ def _rebase_sfx(raw: list[dict], start_vt: float) -> list[SfxHit]:
     ]
 
 
-async def _watch_progress(page, progress, expected_seconds: float | None) -> None:
+async def _watch_progress(page, progress, start_measure: int, end_measure: int) -> None:
+    """Reports render progress as `(elapsed_seconds, total_seconds, fraction)`.
+
+    Both figures are *measured*, not predicted from BPM. The position comes
+    from the measure slider, which is the player's own playback cursor, and
+    the elapsed time from the frames actually captured - so the projected
+    total is just `elapsed / fraction`, and it self-corrects as it goes.
+
+    A BPM estimate is the wrong tool here: 37 of mai-notes' 1558 songs carry
+    a BPM the manifest writes as prose (`"162-180(162)"`, `"120～240(120)"`)
+    that doesn't parse at all, and those variable-tempo charts are precisely
+    the ones a beats-based guess gets wrong even when it does parse.
+    """
+    span = max(1, end_measure - start_measure)
     while True:
         await asyncio.sleep(2.0)
         try:
-            captured = await page.evaluate("() => window.__cc.captured || 0")
+            state = await page.evaluate(
+                """() => {
+                    const s = document.getElementById('measureSlider');
+                    return {
+                        captured: window.__cc.captured || 0,
+                        measure: s ? Number(s.value) : 0,
+                    };
+                }"""
+            )
         except Exception:
             return
-        progress(int(captured) / OUTPUT_FPS, expected_seconds)
+        elapsed = int(state.get("captured") or 0) / OUTPUT_FPS
+        fraction = min(1.0, max(0.0, (float(state.get("measure") or 0) - start_measure) / span))
+        # Below a couple of percent the projection is wild - a 1-measure
+        # cursor movement would claim a 30-minute chart.
+        total = elapsed / fraction if fraction >= 0.02 and elapsed > 0 else None
+        progress(elapsed, total, fraction)
 
 
 async def _transfer_stream(page, total_bytes: int, out_path: Path) -> None:

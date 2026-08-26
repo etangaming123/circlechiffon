@@ -83,6 +83,24 @@ def _safe_filename(title: str, difficulty: Difficulty) -> str:
     return f"chart-{slug or 'song'}-{difficulty.value}.mp4"
 
 
+def _parse_bpm(raw: str | None) -> float | None:
+    """37 of mai-notes' songs write BPM as prose rather than a number -
+    `"162-180(162)"`, `"120～240(120)"`, `"234 (234.5)"` - so a bare float()
+    drops them. The leading number is the chart's base tempo, which is all
+    this is used for (picking a starting bitrate)."""
+    if not raw:
+        return None
+    match = re.search(r"\d+(?:\.\d+)?", str(raw))
+    if match is None:
+        return None
+    value = float(match.group())
+    return value if value > 0 else None
+
+
+def _format_clock(seconds: float) -> str:
+    return f"{int(seconds) // 60}:{int(seconds) % 60:02d}"
+
+
 def _upload_limit(interaction: discord.Interaction) -> int:
     """Discord's attachment cap depends on the server's boost tier, and on
     nothing at all in a DM. Assume the free 10MB unless told otherwise."""
@@ -310,10 +328,7 @@ class ChartCog(commands.Cog):
             tmp_dir = Path(tmp)
             raw = tmp_dir / "capture.h264"
             out = tmp_dir / "chart.mp4"
-            try:
-                bpm = float(chart.song.bpm) if chart.song.bpm else None
-            except (TypeError, ValueError):
-                bpm = None
+            bpm = _parse_bpm(chart.song.bpm)
 
             try:
                 capture = await capture_chart(
@@ -396,12 +411,12 @@ class _ProgressReporter:
         self._task: asyncio.Task | None = None
         self._stopped = False
 
-    def update(self, seconds: float, expected: float | None) -> None:
+    def update(self, elapsed: float, total: float | None, fraction: float) -> None:
         if self._stopped:
             return
         if self._task is not None and not self._task.done():
             return
-        self._task = asyncio.create_task(self._edit(seconds, expected))
+        self._task = asyncio.create_task(self._edit(elapsed, total, fraction))
 
     async def stop(self) -> None:
         """Must be awaited before the final edit. A progress edit still in
@@ -415,17 +430,17 @@ class _ProgressReporter:
             except (asyncio.CancelledError, Exception):
                 pass
 
-    async def _edit(self, seconds: float, expected: float | None) -> None:
+    async def _edit(self, elapsed: float, total: float | None, fraction: float) -> None:
         if self._stopped:
             return
         header = f"Rendering **{self._title}** [{self._difficulty.display_name}]"
-        if expected:
-            # The estimate comes from measure count and BPM, so a chart with
-            # tempo changes runs past it. Hold at 99% rather than showing a
-            # bar that claims to be finished while it plainly isn't.
-            body = _progress_bar(min(seconds / expected, 0.99))
-        else:
-            body = f"{seconds:.0f}s captured"
+        # Hold just short of full until the capture actually ends - the
+        # measure cursor reaches the last measure slightly before the chart
+        # finishes, and a completed bar on a running render reads as a hang.
+        clock = _format_clock(elapsed)
+        if total:
+            clock = f"{clock} / {_format_clock(total)}"
+        body = f"{_progress_bar(min(fraction, 0.99))} · {clock}"
         try:
             await self._interaction.edit_original_response(content=f"{header}\n{body}")
         except discord.HTTPException:
