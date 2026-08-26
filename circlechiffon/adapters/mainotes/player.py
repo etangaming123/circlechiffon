@@ -129,6 +129,13 @@ _MAX_FRAMES = OUTPUT_FPS * 60 * 8
 # The encoded stream comes back base64'd in slices rather than one string.
 _TRANSFER_CHUNK_BYTES = 4 * 1024 * 1024
 
+# Duration pre-pass: hand-step with no canvas capture just to find where the
+# chart ends. 100ms is the trade - measured on the reference chart, it lands
+# on 121.30s (the real capture's exact length) for ~1s of wall time, where a
+# 250ms step is 0.2s long and only saves half a second.
+_PREPASS_STEP_MS = 100.0
+_PREPASS_MAX_STEPS = 20_000
+
 HI_SPEED_DEFAULT = 7.5
 HI_SPEED_MIN = 3.0
 HI_SPEED_MAX = 9.0
@@ -379,6 +386,53 @@ async ([codec, stepMs, captureEvery, fps, maxFrames, bitrate, toMeasure]) => {
 }
 """
 
+# Steps the player to the end without drawing or encoding anything, purely
+# to time the chart. See _measure_duration for why this beats estimating.
+_PREPASS = """
+async ([stepMs, maxSteps, toMeasure]) => {
+  const cc = window.__cc;
+  const slider = document.getElementById('measureSlider');
+  const start = cc.vt;
+  let steps = 0;
+  while (steps < maxSteps) {
+    const pending = Array.from(cc.queue.entries());
+    if (pending.length === 0) break;
+    cc.vt += stepMs;
+    cc.queue.clear();
+    for (const [, cb] of pending) cb(cc.vt);
+    steps++;
+    if (toMeasure !== null && slider && Number(slider.value) > toMeasure) break;
+    if (steps % 200 === 0) await new Promise((r) => setTimeout(r, 0));
+  }
+  return { steps, elapsed: cc.vt - start };
+}
+"""
+
+# Rewind to the render's first measure and drop everything the pre-pass
+# recorded, so the real capture starts from a clean slate.
+_REWIND = """
+([measure]) => {
+  // `#continuePlaybackOnSeek` ships *checked*, so a seek resumes playback on
+  // its own - and then the play click that follows would pause it again,
+  // costing a 4s wait for a state that never arrives. Turn it off so the
+  // rewind reliably leaves the player stopped.
+  const cont = document.getElementById('continuePlaybackOnSeek');
+  if (cont && cont.checked) {
+    cont.checked = false;
+    cont.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  const s = document.getElementById('measureSlider');
+  if (s) {
+    s.value = String(measure);
+    s.dispatchEvent(new Event('input', { bubbles: true }));
+    s.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  window.__cc.sfx = [];
+  window.__cc.captured = 0;
+  return { measure: s ? Number(s.value) : 0, playing: window.__cc.queue.size > 0 };
+}
+"""
+
 _TRANSFER_SLICE = """
 ([start, length]) => {
   const bytes = window.__cc.stream.subarray(start, start + length);
@@ -403,25 +457,17 @@ def _import_playwright():
     return async_playwright
 
 
-def estimate_duration(total_measures: int, bpm: float | None) -> float | None:
-    """Rough chart length from its measure count. maimai charts are 4/4, so
-    a measure is four beats. A chart with tempo changes runs longer than
-    this says, which is what the margin in `_bitrate_for` covers. (Checked
-    against the reference chart: 77 measures at 155 BPM predicts 119s, and
-    it renders to 121.3s.)"""
-    if not bpm or bpm <= 0 or total_measures <= 0:
-        return None
-    return total_measures * 4 * 60 / bpm
+def _bitrate_for(duration_s: float | None, size_budget_bytes: int | None) -> int:
+    """Pick an encoder bitrate that lands inside the upload budget.
 
-
-def _bitrate_for(estimated_duration_s: float | None, size_budget_bytes: int | None) -> int:
-    """Pick an encoder bitrate that lands inside the upload budget without
-    needing a corrective re-encode in the common case."""
-    if not estimated_duration_s or not size_budget_bytes:
+    The duration comes from the pre-pass, so it's the real length of what is
+    about to be encoded rather than an estimate - hence only a small margin
+    for the container overhead and rate-control slop, not the 20% a
+    BPM-derived guess needed.
+    """
+    if not duration_s or not size_budget_bytes:
         return _DEFAULT_BITRATE
-    # 20% margin: the estimate comes from measure count and BPM, and a chart
-    # with tempo changes will run longer than that suggests.
-    budget = int(size_budget_bytes * 8 / (estimated_duration_s * 1.2))
+    budget = int(size_budget_bytes * 8 / (duration_s * 1.05))
     return max(_MIN_BITRATE, min(_MAX_BITRATE, budget))
 
 
@@ -432,7 +478,6 @@ async def capture_chart(
     hi_speed: float = HI_SPEED_DEFAULT,
     from_measure: int | None = None,
     to_measure: int | None = None,
-    bpm: float | None = None,
     size_budget_bytes: int | None = None,
     progress=None,
 ) -> CaptureResult:
@@ -459,7 +504,7 @@ async def capture_chart(
             try:
                 return await _capture(
                     browser, chart_id, out_path, hi_speed, from_measure, to_measure,
-                    bpm, size_budget_bytes, progress,
+                    size_budget_bytes, progress,
                 )
             finally:
                 await browser.close()
@@ -476,7 +521,7 @@ async def capture_chart(
 
 async def _capture(
     browser, chart_id, out_path, hi_speed, from_measure, to_measure,
-    bpm, size_budget_bytes, progress,
+    size_budget_bytes, progress,
 ) -> CaptureResult:
     # A fresh context every time: the site parks a "last load crashed"
     # sentinel in localStorage and then refuses to auto-load charts.
@@ -523,20 +568,13 @@ async def _capture(
         await _start_playback(page)
 
         end = None if to_measure is None else max(start_measure, int(to_measure))
-        # The measure count is only known once the chart has parsed, which is
-        # why the bitrate is decided here rather than by the caller. It's
-        # sized to the *rendered span*, not the whole chart - a from/to range
-        # given the full chart's duration would starve the encoder.
-        #
-        # A rough beats-based estimate is fine for this: it only picks a
-        # starting bitrate, and encode_capture re-encodes anyway if the result
-        # overshoots the upload budget. Progress reporting deliberately does
-        # not use it - see _watch_progress.
-        end_measure = end if end is not None else total_measures
-        bitrate = _bitrate_for(estimate_duration(end_measure - start_measure, bpm), size_budget_bytes)
+        span_seconds = await _measure_duration(page, end)
+        await page.evaluate(_REWIND, [start_measure])
+        await _start_playback(page)
 
+        bitrate = _bitrate_for(span_seconds, size_budget_bytes)
         watcher = (
-            asyncio.create_task(_watch_progress(page, progress, start_measure, end_measure))
+            asyncio.create_task(_watch_progress(page, progress, span_seconds))
             if progress else None
         )
         try:
@@ -583,6 +621,34 @@ async def _capture(
         await context.close()
 
 
+async def _measure_duration(page, to_measure: int | None) -> float | None:
+    """How long the render will be, in seconds, measured rather than guessed.
+
+    Steps the player to the end with no canvas capture and no encoding, then
+    the caller rewinds and captures for real. Costs about a second on a
+    2-minute chart and lands on its exact length (measured: 121.30s against a
+    real capture of 121.30s).
+
+    The alternative - `measures * 4 * 60 / bpm` - is wrong twice over. It
+    can't parse the 37 songs whose manifest BPM is prose (`"162-180(162)"`,
+    `"120～240(120)"`), and on any chart with a tempo change the measures
+    aren't equal lengths, so a total derived from the measure cursor drifts
+    as it plays: PANDORA PARADOXXX projected anywhere from 2:40 down to its
+    real 2:24 over the course of one render. A total that keeps changing is
+    worse than no total at all.
+
+    Returns None if the pre-pass ends immediately, in which case the caller
+    falls back to a default bitrate and elapsed-only progress.
+    """
+    result = await page.evaluate(_PREPASS, [_PREPASS_STEP_MS, _PREPASS_MAX_STEPS, to_measure])
+    elapsed_ms = float(result.get("elapsed") or 0.0)
+    if elapsed_ms < 1000.0:
+        return None
+    # The loop stops on the first step *past* the end, so it overshoots by up
+    # to one step; centre that.
+    return (elapsed_ms - _PREPASS_STEP_MS / 2) / 1000.0
+
+
 def _rebase_sfx(raw: list[dict], start_vt: float) -> list[SfxHit]:
     """Put sound events on the video's timeline.
 
@@ -609,40 +675,22 @@ def _rebase_sfx(raw: list[dict], start_vt: float) -> list[SfxHit]:
     ]
 
 
-async def _watch_progress(page, progress, start_measure: int, end_measure: int) -> None:
-    """Reports render progress as `(elapsed_seconds, total_seconds, fraction)`.
+async def _watch_progress(page, progress, total_seconds: float | None) -> None:
+    """Reports `(elapsed_seconds, total_seconds, fraction)`.
 
-    Both figures are *measured*, not predicted from BPM. The position comes
-    from the measure slider, which is the player's own playback cursor, and
-    the elapsed time from the frames actually captured - so the projected
-    total is just `elapsed / fraction`, and it self-corrects as it goes.
-
-    A BPM estimate is the wrong tool here: 37 of mai-notes' 1558 songs carry
-    a BPM the manifest writes as prose (`"162-180(162)"`, `"120～240(120)"`)
-    that doesn't parse at all, and those variable-tempo charts are precisely
-    the ones a beats-based guess gets wrong even when it does parse.
+    Both numbers are measured: the total from the pre-pass, the elapsed from
+    frames actually captured. The total is fixed for the whole render, which
+    is the point - deriving it live from the measure cursor made it wander.
     """
-    span = max(1, end_measure - start_measure)
     while True:
         await asyncio.sleep(2.0)
         try:
-            state = await page.evaluate(
-                """() => {
-                    const s = document.getElementById('measureSlider');
-                    return {
-                        captured: window.__cc.captured || 0,
-                        measure: s ? Number(s.value) : 0,
-                    };
-                }"""
-            )
+            captured = await page.evaluate("() => window.__cc.captured || 0")
         except Exception:
             return
-        elapsed = int(state.get("captured") or 0) / OUTPUT_FPS
-        fraction = min(1.0, max(0.0, (float(state.get("measure") or 0) - start_measure) / span))
-        # Below a couple of percent the projection is wild - a 1-measure
-        # cursor movement would claim a 30-minute chart.
-        total = elapsed / fraction if fraction >= 0.02 and elapsed > 0 else None
-        progress(elapsed, total, fraction)
+        elapsed = int(captured) / OUTPUT_FPS
+        fraction = min(1.0, elapsed / total_seconds) if total_seconds else 0.0
+        progress(elapsed, total_seconds, fraction)
 
 
 async def _transfer_stream(page, total_bytes: int, out_path: Path) -> None:

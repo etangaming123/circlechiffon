@@ -83,20 +83,6 @@ def _safe_filename(title: str, difficulty: Difficulty) -> str:
     return f"chart-{slug or 'song'}-{difficulty.value}.mp4"
 
 
-def _parse_bpm(raw: str | None) -> float | None:
-    """37 of mai-notes' songs write BPM as prose rather than a number -
-    `"162-180(162)"`, `"120～240(120)"`, `"234 (234.5)"` - so a bare float()
-    drops them. The leading number is the chart's base tempo, which is all
-    this is used for (picking a starting bitrate)."""
-    if not raw:
-        return None
-    match = re.search(r"\d+(?:\.\d+)?", str(raw))
-    if match is None:
-        return None
-    value = float(match.group())
-    return value if value > 0 else None
-
-
 def _format_clock(seconds: float) -> str:
     return f"{int(seconds) // 60}:{int(seconds) % 60:02d}"
 
@@ -328,7 +314,6 @@ class ChartCog(commands.Cog):
             tmp_dir = Path(tmp)
             raw = tmp_dir / "capture.h264"
             out = tmp_dir / "chart.mp4"
-            bpm = _parse_bpm(chart.song.bpm)
 
             try:
                 capture = await capture_chart(
@@ -336,7 +321,6 @@ class ChartCog(commands.Cog):
                     hi_speed=hi_speed,
                     from_measure=from_measure,
                     to_measure=to_measure,
-                    bpm=bpm,
                     size_budget_bytes=limit,
                     progress=progress.update,
                 )
