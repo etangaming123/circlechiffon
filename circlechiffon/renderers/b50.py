@@ -27,25 +27,31 @@ FONT_HEADER_STAT_LABEL = ImageFont.truetype(_INTER_REGULAR, 14)
 FONT_SECTION_LABEL = ImageFont.truetype(_INTER_BOLD, 16)
 FONT_FOOTER = ImageFont.truetype(_INTER_REGULAR, 13)
 
-CANVAS_WIDTH = 1500
-GRID_COLS = 5
+# Landscape layout: the two sections sit side by side rather than stacked,
+# and 35 / 15 both factor into 5 rows (7 wide and 3 wide respectively), so
+# the grids line up top and bottom with no partial row in either.
+COL_WIDTH = 300
 ROW_HEIGHT = 124
-COL_WIDTH = CANVAS_WIDTH // GRID_COLS
 CELL_PADDING = 4
 CARD_WIDTH = COL_WIDTH - CELL_PADDING * 2
 CARD_HEIGHT = ROW_HEIGHT - CELL_PADDING * 2
 JACKET_SIZE = 84
-B35_ROWS = 7
-B15_ROWS = 3
 
-HEADER_HEIGHT = 140
+B35_COLS, B35_ROWS = 7, 5  # 35 cells
+B15_COLS, B15_ROWS = 3, 5  # 15 cells
+GRID_ROWS = B35_ROWS  # both sections are the same height
+
+SIDE_MARGIN = 18
+SECTION_GAP = 36  # between the two grid blocks; holds the vertical divider
+HEADER_HEIGHT = 150
 SECTION_HEADER_H = 32  # label + accent bar above each B35/B15 grid
-GRID_GAP = 10  # gap between the B35 grid and the B15 section label
 FOOTER_HEIGHT = 27
+LOGO_HEIGHT = 78  # current-version title logo, header top-right
 
-# exact sum of every band below - keeps the footer flush against the
-# bottom of the B15 grid with no leftover slop.
-CANVAS_HEIGHT = HEADER_HEIGHT + SECTION_HEADER_H + B35_ROWS * ROW_HEIGHT + GRID_GAP + SECTION_HEADER_H + B15_ROWS * ROW_HEIGHT + FOOTER_HEIGHT
+# exact sums of every band - keeps the footer flush against the bottom of
+# the grids and the outer margins even, with no leftover slop.
+CANVAS_WIDTH = SIDE_MARGIN + B35_COLS * COL_WIDTH + SECTION_GAP + B15_COLS * COL_WIDTH + SIDE_MARGIN
+CANVAS_HEIGHT = HEADER_HEIGHT + SECTION_HEADER_H + GRID_ROWS * ROW_HEIGHT + FOOTER_HEIGHT
 
 BACKGROUND_COLOR = (24, 24, 32)
 TEMPLATE_PATH = ASSETS_DIR / "b50" / "template.png"
@@ -59,6 +65,7 @@ RATING_ACCENT_COLOR = (255, 221, 51)
 
 _SECTION_OLD_COLOR = (140, 150, 210)  # B35 - older-version bests
 _SECTION_NEW_COLOR = (255, 176, 64)  # B15 - current-version bests, called out more
+_DIVIDER_COLOR = (70, 72, 88)  # vertical rule between the two grid blocks
 
 # shared with renderers/display.py and renderers/profile.py - the
 # title/trophy banner has no image asset anywhere on the real site (it's
@@ -373,24 +380,30 @@ def _render_grid(
     base: Image.Image,
     entries: list[RatedEntry | None],
     jackets_by_title: dict[str, bytes],
+    origin_x: int,
     top_y: int,
+    cols: int,
     badge_icons: dict[str, bytes],
 ) -> None:
     for i, entry in enumerate(entries):
-        col = i % GRID_COLS
-        row = i // GRID_COLS
-        x = col * COL_WIDTH
+        col = i % cols
+        row = i // cols
+        x = origin_x + col * COL_WIDTH
         y = top_y + row * ROW_HEIGHT
         jacket_bytes = jackets_by_title.get(entry.score.title) if entry is not None else None
         _render_cell(base, entry, x, y, jacket_bytes, i + 1, badge_icons)
 
 
-def _render_section_header(draw: ImageDraw.ImageDraw, label: str, top_y: int, color: tuple[int, int, int]) -> None:
+def _render_section_header(
+    draw: ImageDraw.ImageDraw, label: str, x0: int, x1: int, top_y: int, color: tuple[int, int, int]
+) -> None:
     """Colored accent bar + label above a grid - replaces the old single
     1px hairline divider so the B35/older vs B15/current split reads
-    clearly at a glance instead of just as whitespace."""
-    draw.rectangle([(24, top_y), (CANVAS_WIDTH - 24, top_y + 4)], fill=color)
-    draw.text((24, top_y + 10), label, font=FONT_SECTION_LABEL, fill=color)
+    clearly at a glance instead of just as whitespace. Spans x0..x1 rather
+    than the full canvas, since the two sections now sit side by side and
+    each bar has to sit over its own grid block."""
+    draw.rectangle([(x0, top_y), (x1, top_y + 4)], fill=color)
+    draw.text((x0, top_y + 10), label, font=FONT_SECTION_LABEL, fill=color)
 
 
 def render_b50(
@@ -403,33 +416,52 @@ def render_b50(
     b15_version_label: str = "CURRENT VERSION",
     jackets_by_title: dict[str, bytes],
     badge_icons: dict[str, bytes] | None = None,
+    version_logo_bytes: bytes | None = None,
     output,
 ) -> None:
     """Synchronous - CPU-bound Pillow work. Call via asyncio.to_thread().
     `badge_icons` (rank/combo/sync PNGs, see adapters/maimai_net/badge_icons.py)
     is optional - missing keys just skip that icon, card still renders.
     `icon_bytes`/`rating_badge_bytes` are optional too and degrade to a
-    placeholder / plain text respectively, same as `/cc-display`."""
+    placeholder / plain text respectively, same as `/cc-display`.
+    `version_logo_bytes` is the current game version's title logo (see
+    adapters/maimai_site/version_logo.py) - omitted entirely when None."""
     badge_icons = badge_icons or {}
     image = _load_base_image()
     draw = ImageDraw.Draw(image)
 
     # header: profile icon + player name + rating badge on the left,
-    # Total/B15/B35 stat blocks right-aligned.
+    # Total/B15/B35 stat blocks right-aligned, current-version title logo
+    # pinned to the top-right corner beyond them.
     header_pad = 24
     icon_size = 96
     icon_x, icon_y = header_pad, (HEADER_HEIGHT - icon_size) // 2
 
+    # logo first - the stat blocks lay out leftwards from whatever edge it
+    # leaves free, so its scaled width has to be known before they're drawn.
+    # (_paste_scaled pastes *then* reports the width, which is too late for
+    # right-alignment, so this scales and pastes by hand.)
+    logo_w = 0
+    if version_logo_bytes:
+        try:
+            with Image.open(io.BytesIO(version_logo_bytes)) as logo_src:
+                logo = _scale_to_height(logo_src.convert("RGBA"), LOGO_HEIGHT)
+                logo_y = (HEADER_HEIGHT - LOGO_HEIGHT) // 2
+                image.paste(logo, (CANVAS_WIDTH - header_pad - logo.width, logo_y), logo)
+                logo_w = logo.width
+        except Exception:
+            logo_w = 0
+
     stats = [("Total", result.total_rating), ("B15", result.b15_total), ("B35", result.b35_total)]
-    stat_x = CANVAS_WIDTH - 24
+    stat_x = CANVAS_WIDTH - header_pad - (logo_w + 32 if logo_w else 0)
     for label, value in reversed(stats):
         value_text = str(value)
         value_w = draw.textlength(value_text, font=FONT_HEADER_STAT_VALUE)
         label_w = draw.textlength(label, font=FONT_HEADER_STAT_LABEL)
         block_w = max(value_w, label_w) + 30
         stat_x -= block_w
-        draw.text((stat_x + (block_w - value_w) / 2, 46), value_text, font=FONT_HEADER_STAT_VALUE, fill=(255, 255, 255))
-        draw.text((stat_x + (block_w - label_w) / 2, 86), label, font=FONT_HEADER_STAT_LABEL, fill=(180, 180, 190))
+        draw.text((stat_x + (block_w - value_w) / 2, 50), value_text, font=FONT_HEADER_STAT_VALUE, fill=(255, 255, 255))
+        draw.text((stat_x + (block_w - label_w) / 2, 90), label, font=FONT_HEADER_STAT_LABEL, fill=(180, 180, 190))
 
     # slight round, not a full circle - same convention as /cc-display's icon.
     icon_mask = _rounded_mask((icon_size, icon_size), 10)
@@ -460,18 +492,39 @@ def render_b50(
     if rating_w == 0:
         draw.text((content_x, badge_y), f"Rating {rating_text}", font=FONT_HEADER_STAT_LABEL, fill=(200, 200, 205))
 
-    # B35 grid (older-version bests), section-labeled divider, B15 grid
-    # (current-version bests) - each grid gets its own accent-colored
-    # label band instead of one thin shared hairline.
-    b35_label_top = HEADER_HEIGHT
-    _render_section_header(draw, "BEST 35 · OLDER VERSIONS", b35_label_top, _SECTION_OLD_COLOR)
-    b35_top = b35_label_top + SECTION_HEADER_H
-    _render_grid(image, result.b35, jackets_by_title, b35_top, badge_icons)
+    # B35 grid (older-version bests) on the left, B15 grid (current-version
+    # bests) on the right, each under its own accent-colored label band,
+    # with a vertical rule down the gap between them.
+    label_top = HEADER_HEIGHT
+    grid_top = label_top + SECTION_HEADER_H
+    b35_origin_x = SIDE_MARGIN
+    b15_origin_x = SIDE_MARGIN + B35_COLS * COL_WIDTH + SECTION_GAP
 
-    b15_label_top = b35_top + B35_ROWS * ROW_HEIGHT + GRID_GAP
-    _render_section_header(draw, f"BEST 15 · {b15_version_label}", b15_label_top, _SECTION_NEW_COLOR)
-    b15_top = b15_label_top + SECTION_HEADER_H
-    _render_grid(image, result.b15, jackets_by_title, b15_top, badge_icons)
+    _render_section_header(
+        draw,
+        "BEST 35 · OLDER VERSIONS",
+        b35_origin_x + CELL_PADDING,
+        b35_origin_x + B35_COLS * COL_WIDTH - CELL_PADDING,
+        label_top,
+        _SECTION_OLD_COLOR,
+    )
+    _render_grid(image, result.b35, jackets_by_title, b35_origin_x, grid_top, B35_COLS, badge_icons)
+
+    _render_section_header(
+        draw,
+        f"BEST 15 · {b15_version_label}",
+        b15_origin_x + CELL_PADDING,
+        b15_origin_x + B15_COLS * COL_WIDTH - CELL_PADDING,
+        label_top,
+        _SECTION_NEW_COLOR,
+    )
+    _render_grid(image, result.b15, jackets_by_title, b15_origin_x, grid_top, B15_COLS, badge_icons)
+
+    divider_x = b35_origin_x + B35_COLS * COL_WIDTH + SECTION_GAP // 2
+    draw.rectangle(
+        [(divider_x - 1, label_top), (divider_x + 1, grid_top + GRID_ROWS * ROW_HEIGHT - CELL_PADDING)],
+        fill=_DIVIDER_COLOR,
+    )
 
     # footer
     footer_y = CANVAS_HEIGHT - FOOTER_HEIGHT
@@ -506,26 +559,44 @@ def render_b50_template(output) -> None:
     badge_y = icon_y + 44
     _draw_guide_box(draw, (content_x, badge_y, content_x + 150, badge_y + badge_h), "RATING BADGE")
 
-    stat_x = CANVAS_WIDTH - 24
+    # the real render sizes the logo from the fetched PNG's aspect - the
+    # live asset is 352x154, so LOGO_HEIGHT maps to ~178px wide.
+    logo_w = round(LOGO_HEIGHT * 352 / 154)
+    logo_y = (HEADER_HEIGHT - LOGO_HEIGHT) // 2
+    _draw_guide_box(
+        draw,
+        (CANVAS_WIDTH - header_pad - logo_w, logo_y, CANVAS_WIDTH - header_pad, logo_y + LOGO_HEIGHT),
+        "VERSION LOGO",
+    )
+
+    stat_x = CANVAS_WIDTH - header_pad - logo_w - 32
     for label in ("B35", "B15", "Total"):
         block_w = 90
         stat_x -= block_w
-        _draw_guide_box(draw, (stat_x, 40, stat_x + block_w, 100), f"STAT: {label}")
+        _draw_guide_box(draw, (stat_x, 44, stat_x + block_w, 104), f"STAT: {label}")
 
-    b35_label_top = HEADER_HEIGHT
-    _draw_guide_box(draw, (24, b35_label_top, CANVAS_WIDTH - 24, b35_label_top + SECTION_HEADER_H), "SECTION HEADER: BEST 35")
-    b35_top = b35_label_top + SECTION_HEADER_H
+    label_top = HEADER_HEIGHT
+    grid_top = label_top + SECTION_HEADER_H
+    b35_origin_x = SIDE_MARGIN
+    b15_origin_x = SIDE_MARGIN + B35_COLS * COL_WIDTH + SECTION_GAP
+    for section_label, origin_x, cols in (("BEST 35", b35_origin_x, B35_COLS), ("BEST 15", b15_origin_x, B15_COLS)):
+        _draw_guide_box(
+            draw,
+            (
+                origin_x + CELL_PADDING,
+                label_top,
+                origin_x + cols * COL_WIDTH - CELL_PADDING,
+                label_top + SECTION_HEADER_H,
+            ),
+            f"SECTION HEADER: {section_label}",
+        )
 
-    b15_label_top = b35_top + B35_ROWS * ROW_HEIGHT + GRID_GAP
-    _draw_guide_box(draw, (24, b15_label_top, CANVAS_WIDTH - 24, b15_label_top + SECTION_HEADER_H), "SECTION HEADER: BEST 15")
-    b15_top = b15_label_top + SECTION_HEADER_H
-
-    for section_label, top_y, rows in (("B35", b35_top, B35_ROWS), ("B15", b15_top, B15_ROWS)):
-        for i in range(GRID_COLS * rows):
-            col = i % GRID_COLS
-            row = i // GRID_COLS
-            x = col * COL_WIDTH
-            y = top_y + row * ROW_HEIGHT
+    for section_label, origin_x, cols in (("B35", b35_origin_x, B35_COLS), ("B15", b15_origin_x, B15_COLS)):
+        for i in range(cols * GRID_ROWS):
+            col = i % cols
+            row = i // cols
+            x = origin_x + col * COL_WIDTH
+            y = grid_top + row * ROW_HEIGHT
             card_pos = (x + CELL_PADDING, y + CELL_PADDING)
             _draw_guide_box(
                 draw, (card_pos[0], card_pos[1], card_pos[0] + CARD_WIDTH, card_pos[1] + CARD_HEIGHT), f"{section_label} #{i + 1}"

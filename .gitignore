@@ -11,6 +11,7 @@ temporary/
 *.bat
 data/badge_icons_cache
 data/jackets_cache
+data/version_logo_cache
 CLAUDE.md
 im_a_filthy_vibecoder_lmfao.txt
 startcirclechiffon.bat

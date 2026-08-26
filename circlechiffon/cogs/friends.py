@@ -12,6 +12,7 @@ from discord.ext import commands
 from circlechiffon import access, accounts, embed_colors
 from circlechiffon.adapters.dxrating.images import get_jackets_bulk
 from circlechiffon.adapters.maimai_net.badge_icons import get_all_badge_icons
+from circlechiffon.adapters.maimai_site.version_logo import get_version_logo
 from circlechiffon.adapters.maimai_net.errors import MaimaiNetError, SessionExpired
 from circlechiffon.ratingcalc.best50 import calculate_best50
 from circlechiffon.renderers.b50 import render_b50
@@ -433,6 +434,7 @@ class FriendsCog(commands.Cog):
                 if image_name in jackets_by_image_name
             }
             badge_icons = await get_all_badge_icons()
+            version_logo_bytes = await get_version_logo()
 
             b15_versions = [v for v in (catalog.current_version, catalog.previous_version) if v is not None]
             b15_version_label = " and ".join(b15_versions) if b15_versions else "CURRENT VERSION"
@@ -449,6 +451,7 @@ class FriendsCog(commands.Cog):
                 b15_version_label=b15_version_label,
                 jackets_by_title=jackets_by_title,
                 badge_icons=badge_icons,
+                version_logo_bytes=version_logo_bytes,
                 output=buf,
             )
 
