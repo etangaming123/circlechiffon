@@ -14,6 +14,10 @@ from circlechiffon.database import engine as db_engine
 from circlechiffon.database.models import BannedUser
 
 MAIMAI_NET_COOLDOWN = 15  # commands that talk to maimai DX NET
+# Fan-out commands that issue one request per friend rather than a fixed
+# handful - on a ~50-friend account that's ~50 requests against a
+# process-wide 10/s rate limiter, so these get their own much longer tier.
+MAIMAI_NET_HEAVY_COOLDOWN = 120
 DEFAULT_COOLDOWN = 5  # everything else
 
 _cooldowns: dict[int, dict[str, float]] = {}
@@ -51,6 +55,16 @@ def _check_cooldown(discord_id: int, command_name: str) -> float | None:
 
 def _set_cooldown(discord_id: int, command_name: str, seconds: int) -> None:
     _cooldowns.setdefault(discord_id, {})[command_name] = time.time() + seconds
+
+
+def clear_cooldown(discord_id: int, command_name: str) -> None:
+    """Releases a cooldown that handle_command_access already recorded.
+
+    That call sets the cooldown up front, before the command does any work -
+    which is wrong for a command that then asks the user to confirm before
+    starting, since declining would otherwise cost them the full cooldown
+    for a command that never ran. Call this on the decline/timeout path."""
+    _cooldowns.get(discord_id, {}).pop(command_name, None)
 
 
 async def get_ban(discord_id: int) -> BannedUser | None:

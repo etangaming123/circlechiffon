@@ -63,6 +63,24 @@ _COMMON_HEADERS = {
 # we don't want to get ip banned :(
 _RATE_LIMITER = AsyncLimiter(10, 1)
 
+# The 0..4 diff values record/musicGenre and friend/friendGenreVs both use,
+# as Difficulty members rather than MUSIC_RECORD_DIFF_LABELS' display
+# strings. UTAGE (10) has no Difficulty member and is deliberately absent -
+# callers narrowing by Difficulty can't ask for it.
+DIFF_VALUE_TO_DIFFICULTY = {
+    0: Difficulty.basic,
+    1: Difficulty.advanced,
+    2: Difficulty.expert,
+    3: Difficulty.master,
+    4: Difficulty.remaster,
+}
+DIFFICULTY_TO_DIFF_VALUE = {d: v for v, d in DIFF_VALUE_TO_DIFFICULTY.items()}
+
+# How many friends' score pages to have in flight at once. The rate limiter
+# above is shared process-wide, so an unbounded fan-out across a 48-friend
+# account would hold every slot for seconds and stall other users' commands.
+_FRIEND_FANOUT_CONCURRENCY = 5
+
 # Backoff between _get_page retries of a transient DX NET error; one entry
 # per retry, so 2 entries = 3 attempts total. The last attempt reloads the
 # home page first (see _get_page) - the "back out and re-enter" a browser
@@ -434,6 +452,7 @@ class MaimaiNetClient:
         self,
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         include_utage: bool = True,
+        difficulties: list[Difficulty] | None = None,
     ) -> list[Score]:
         """Fetch every difficulty's score list (BASIC..Re:MASTER, plus UTAGE
         unless `include_utage=False` - UTAGE charts don't count toward
@@ -443,10 +462,19 @@ class MaimaiNetClient:
         rather than completion order, so `on_progress` (if given) always
         reports difficulties in that same fixed order regardless of which
         request actually lands first - the requests still run in parallel
-        underneath, this only fixes the order results are consumed in."""
-        diff_values = [
-            v for v in urls.MUSIC_RECORD_DIFF_VALUES if include_utage or v != urls.UTAGE_DIFF_VALUE
-        ]
+        underneath, this only fixes the order results are consumed in.
+
+        `difficulties` narrows the fetch to just those difficulties (one
+        request each) for callers that only care about a single chart -
+        it can't select UTAGE, which has no Difficulty member, so it
+        implies `include_utage=False`."""
+        if difficulties is not None:
+            wanted = {DIFFICULTY_TO_DIFF_VALUE[d] for d in difficulties}
+            diff_values = [v for v in urls.MUSIC_RECORD_DIFF_VALUES if v in wanted]
+        else:
+            diff_values = [
+                v for v in urls.MUSIC_RECORD_DIFF_VALUES if include_utage or v != urls.UTAGE_DIFF_VALUE
+            ]
 
         async def fetch(diff_value: int) -> list[Score]:
             url = f"{urls.INTL['RECORD_MUSICS_PAGE']}?genre=99&diff={diff_value}"
@@ -531,6 +559,7 @@ class MaimaiNetClient:
         self,
         idx: str,
         on_progress: Callable[[str], Awaitable[None]] | None = None,
+        difficulties: list[Difficulty] | None = None,
     ) -> list[Score]:
         """Fetch a friend's achievement/combo/sync per difficulty (confirmed
         live against /friend/friendGenreVs/battleStart/ - BASIC..Re:MASTER,
@@ -539,32 +568,34 @@ class MaimaiNetClient:
         urls.py's FRIEND_SCORE_PAGE comment), only achievement - enough for
         calculate_best50/calculate_rating, which is all this is for.
 
-        SEGA appears to only return data here for friends the account has
-        marked as a Favorite on the friend list - a friend who isn't
-        favorited comes back with every difficulty empty, same as a friend
-        who's genuinely never played; callers can't tell those apart from
-        an empty result alone."""
+        Favorite status is irrelevant here - an earlier note in this
+        docstring claimed SEGA only returned data for friends marked as a
+        Favorite, and that is wrong. Re-verified live: a non-favorited
+        friend's page returned 177 played MASTER charts against a favorited
+        friend's 52, off the same account. An empty result means the friend
+        genuinely hasn't played anything at that difficulty.
+
+        `difficulties` narrows the fetch to just those difficulties. One
+        chart's leaderboard across every friend only needs one difficulty
+        each, so this is what keeps that fan-out at 1 request per friend
+        instead of 5."""
         diff_labels = {v: urls.MUSIC_RECORD_DIFF_LABELS[v] for v in urls.FRIEND_SCORE_DIFF_VALUES}
-        # same 0..4 mapping as MUSIC_RECORD_DIFF_LABELS, just as Difficulty
-        # members instead of display strings (there's no UTAGE case here).
-        diff_values_to_difficulty = {
-            0: Difficulty.basic,
-            1: Difficulty.advanced,
-            2: Difficulty.expert,
-            3: Difficulty.master,
-            4: Difficulty.remaster,
-        }
+        if difficulties is not None:
+            wanted = {DIFFICULTY_TO_DIFF_VALUE[d] for d in difficulties}
+            diff_values = [v for v in urls.FRIEND_SCORE_DIFF_VALUES if v in wanted]
+        else:
+            diff_values = list(urls.FRIEND_SCORE_DIFF_VALUES)
 
         async def fetch(diff_value: int) -> list[Score]:
-            difficulty = diff_values_to_difficulty[diff_value]
+            difficulty = DIFF_VALUE_TO_DIFFICULTY[diff_value]
             url = f"{urls.INTL['FRIEND_SCORE_PAGE']}&diff={diff_value}&idx={idx}"
             html = await self._get_page(url)
             return parse_friend_scores(html, difficulty)
 
-        tasks = [asyncio.create_task(fetch(v)) for v in urls.FRIEND_SCORE_DIFF_VALUES]
+        tasks = [asyncio.create_task(fetch(v)) for v in diff_values]
         all_scores: list[Score] = []
         try:
-            for diff_value, task in zip(urls.FRIEND_SCORE_DIFF_VALUES, tasks):
+            for diff_value, task in zip(diff_values, tasks):
                 scores = await task
                 if on_progress is not None:
                     await on_progress(diff_labels[diff_value])
@@ -575,6 +606,69 @@ class MaimaiNetClient:
             await asyncio.gather(*tasks, return_exceptions=True)
             raise
         return all_scores
+
+    async def get_friends_chart_scores(
+        self,
+        entries: list[FriendEntry],
+        difficulty: Difficulty,
+        on_progress: Callable[[int, int], Awaitable[None]] | None = None,
+    ) -> tuple[dict[str, list[Score]], int]:
+        """Fetch every friend's scores at one difficulty - the fan-out behind
+        a single chart's leaderboard. Takes an already-fetched friend list
+        rather than calling get_friend_list() itself, so a caller that
+        re-renders for another difficulty doesn't re-paginate the list.
+
+        One request per friend (see get_friend_scores' `difficulties`),
+        capped at _FRIEND_FANOUT_CONCURRENCY in flight so this doesn't
+        monopolize the process-wide rate limiter while it runs.
+
+        Returns (scores keyed by friend idx, count of friends whose fetch
+        failed). One friend erroring must not sink the whole leaderboard,
+        so per-friend failures are counted rather than raised - but
+        SessionExpired/MaintenanceError are conditions of the session as a
+        whole, not of one friend, so those propagate (with_client needs to
+        see SessionExpired to do its silent re-login).
+
+        `on_progress` is called as (done, total) while friends land - a
+        different shape from the per-difficulty-label callback the other
+        score fetches take, since here the unit of progress is a friend."""
+        if not entries:
+            return {}, 0
+
+        semaphore = asyncio.Semaphore(_FRIEND_FANOUT_CONCURRENCY)
+        done = 0
+
+        async def fetch(entry: FriendEntry) -> list[Score]:
+            nonlocal done
+            async with semaphore:
+                try:
+                    return await self.get_friend_scores(entry.idx, difficulties=[difficulty])
+                finally:
+                    done += 1
+                    if on_progress is not None:
+                        await on_progress(done, len(entries))
+
+        tasks = [asyncio.create_task(fetch(e)) for e in entries]
+        try:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+        except BaseException:
+            # Same reasoning as get_music_scores: don't leave tasks in flight
+            # for with_client's finally to close the httpx client under.
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
+
+        scores_by_idx: dict[str, list[Score]] = {}
+        failed = 0
+        for entry, result in zip(entries, results):
+            if isinstance(result, (SessionExpired, MaintenanceError)):
+                raise result
+            if isinstance(result, BaseException):
+                failed += 1
+                continue
+            scores_by_idx[entry.idx] = result
+        return scores_by_idx, failed
 
     async def get_recent_score_detail(self, idx: str) -> Judgements | None:
         """Best-effort fetch of a single play's judgment-count breakdown.
