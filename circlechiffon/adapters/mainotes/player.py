@@ -523,11 +523,19 @@ async def _capture(
         await _start_playback(page)
 
         end = None if to_measure is None else max(start_measure, int(to_measure))
-        # The measure count is only known once the chart has parsed, which
-        # is why the bitrate is chosen here rather than by the caller.
-        bitrate = _bitrate_for(estimate_duration(total_measures, bpm), size_budget_bytes)
+        # The measure count is only known once the chart has parsed, which is
+        # why this is decided here rather than by the caller. Measure the
+        # *rendered span*, not the whole chart: a from/to range would
+        # otherwise be given the full chart's duration, which both understates
+        # progress and starves the encoder of bitrate.
+        span_measures = (end if end is not None else total_measures) - start_measure
+        expected_seconds = estimate_duration(span_measures, bpm)
+        bitrate = _bitrate_for(expected_seconds, size_budget_bytes)
 
-        watcher = asyncio.create_task(_watch_progress(page, progress)) if progress else None
+        watcher = (
+            asyncio.create_task(_watch_progress(page, progress, expected_seconds))
+            if progress else None
+        )
         try:
             summary = await asyncio.wait_for(
                 page.evaluate(
@@ -598,14 +606,14 @@ def _rebase_sfx(raw: list[dict], start_vt: float) -> list[SfxHit]:
     ]
 
 
-async def _watch_progress(page, progress) -> None:
+async def _watch_progress(page, progress, expected_seconds: float | None) -> None:
     while True:
         await asyncio.sleep(2.0)
         try:
             captured = await page.evaluate("() => window.__cc.captured || 0")
         except Exception:
             return
-        progress(int(captured) / OUTPUT_FPS)
+        progress(int(captured) / OUTPUT_FPS, expected_seconds)
 
 
 async def _transfer_stream(page, total_bytes: int, out_path: Path) -> None:

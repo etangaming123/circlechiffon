@@ -125,9 +125,6 @@ def _chart_embed(chart: MaiNotesChart, title: str, difficulty: Difficulty) -> di
         embed.add_field(name="Notes", value=value, inline=False)
     if chart.notes_designer:
         embed.add_field(name="Charter", value=chart.notes_designer, inline=True)
-    if chart.top_dxscore:
-        holder = f" — {chart.top_player_name}" if chart.top_player_name else ""
-        embed.add_field(name="Top DX score", value=f"{chart.top_dxscore}{holder}", inline=True)
     if chart.tags:
         embed.add_field(name="Tags", value=" · ".join(chart.tags[:8]), inline=False)
     return embed
@@ -373,6 +370,20 @@ class ChartCog(commands.Cog):
         return await SongsCog.song_autocomplete(self, interaction, current)
 
 
+_BAR_WIDTH = 20
+
+
+def _progress_bar(fraction: float) -> str:
+    """`[########------------] 40%`, wrapped in a code span so Discord renders
+    it monospaced - in a proportional font the fill and empty characters are
+    different widths and the bar visibly jitters as it advances."""
+    fraction = min(1.0, max(0.0, fraction))
+    # Floor, not round: rounding fills the last segment at 97.5%, so a
+    # capture held at 99% would show a full bar while still running.
+    filled = int(fraction * _BAR_WIDTH)
+    return f"`[{'#' * filled}{'-' * (_BAR_WIDTH - filled)}]` {fraction * 100:.0f}%"
+
+
 class _ProgressReporter:
     """Edits the interaction while the capture runs. The capture calls this
     every couple of seconds; edits are throttled well under Discord's rate
@@ -385,12 +396,12 @@ class _ProgressReporter:
         self._task: asyncio.Task | None = None
         self._stopped = False
 
-    def update(self, seconds: float) -> None:
+    def update(self, seconds: float, expected: float | None) -> None:
         if self._stopped:
             return
         if self._task is not None and not self._task.done():
             return
-        self._task = asyncio.create_task(self._edit(seconds))
+        self._task = asyncio.create_task(self._edit(seconds, expected))
 
     async def stop(self) -> None:
         """Must be awaited before the final edit. A progress edit still in
@@ -404,16 +415,19 @@ class _ProgressReporter:
             except (asyncio.CancelledError, Exception):
                 pass
 
-    async def _edit(self, seconds: float) -> None:
+    async def _edit(self, seconds: float, expected: float | None) -> None:
         if self._stopped:
             return
+        header = f"Rendering **{self._title}** [{self._difficulty.display_name}]"
+        if expected:
+            # The estimate comes from measure count and BPM, so a chart with
+            # tempo changes runs past it. Hold at 99% rather than showing a
+            # bar that claims to be finished while it plainly isn't.
+            body = _progress_bar(min(seconds / expected, 0.99))
+        else:
+            body = f"{seconds:.0f}s captured"
         try:
-            await self._interaction.edit_original_response(
-                content=(
-                    f"Rendering **{self._title}** [{self._difficulty.display_name}]... "
-                    f"{seconds:.0f}s of chart captured"
-                )
-            )
+            await self._interaction.edit_original_response(content=f"{header}\n{body}")
         except discord.HTTPException:
             pass
 
