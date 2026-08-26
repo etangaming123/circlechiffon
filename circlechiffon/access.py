@@ -18,6 +18,10 @@ MAIMAI_NET_COOLDOWN = 15  # commands that talk to maimai DX NET
 # handful - on a ~50-friend account that's ~50 requests against a
 # process-wide 10/s rate limiter, so these get their own much longer tier.
 MAIMAI_NET_HEAVY_COOLDOWN = 120
+# Note: there is deliberately no render tier for /cc-chart's video render,
+# heavy though it is. Rendering is owner-only, and handle_command_access
+# exempts the owner from cooldowns entirely, so such a tier could never
+# fire - the render is bounded by cogs/chart.py's semaphore instead.
 DEFAULT_COOLDOWN = 5  # everything else
 
 _cooldowns: dict[int, dict[str, float]] = {}

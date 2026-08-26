@@ -26,12 +26,15 @@ Shoutout to [chuni-penguin](https://github.com/beer-psi/chuni-penguin).
 * `/cc-best` — Renders your Best-50 rating image (B15 = current version + one version prior, B35 = everything older, styled after dxrating.net's own best-50 image). Requires linked account: yes
 * `/cc-info` — Look up a song's chart levels. Add the optional `difficulty` choice for that chart's full detail - version, release date, charter, note counts, and dxrating.net tags - plus jacket art either way. Requires linked account: no
 * `/cc-rating` — Calculate the rating points a (constant, achievement%) combo earns. Requires linked account: no
+* `/cc-chart` — Looks up a chart on [mai-notes.com](https://mai-notes.com/) and, **for the bot owner only**, renders a **video of it playing**. Takes a song title (with autocomplete) plus an optional `difficulty` (default MASTER), `chart_type` (DX/Standard), `notespeed` (ハイスピ, 3.0-9.0, default 7.5), and `from_measure`/`to_measure` to render just a section. Tap sounds are mixed in. Everyone else — and the owner too, whenever mai-notes has no playable data for a chart (only ~45% of what it lists, mostly MASTER and Re:MASTER) — gets the chart's stats instead: level, constant, note breakdown, charter, top DX score, tags. Rendering is owner-gated because it's by far the heaviest thing the bot does (a headless browser plus a video encode), and only one render runs at a time. Needs `ffmpeg` and Playwright's Chromium on the host (see Selfhosting). Requires linked account: no
 * `/cc-friends` — List your maimai DX NET friends, sorted by rating. Optional `show_ids` flag reveals each friend's internal id (only needed to disambiguate two friends with the same name). Requires linked account: yes
 * `/cc-friend-profile` — View a friend's profile by name or id - much more limited than `/cc-profile`, since SEGA doesn't expose play counts or clear-count grids for anyone but yourself. Requires linked account: yes
 * `/cc-friend-best` — Renders a friend's best-50 rating image from their scraped achievements. The rating shown is **computed locally**, not SEGA's own number - SEGA never shows a friend's real rating. Requires linked account: yes
 * `/cc-leaderboard` — Ranks you and all of your friends on a single chart by achievement, showing each player's rank badge and FC/AP status. Takes a song title (with autocomplete) and an optional `difficulty` (default MASTER); `< / >` buttons switch difficulty. Players with no score on the chart are hidden. Because it's an intensive command it asks you to confirm before fetching anything, and has a longer 120s cooldown. Requires linked account: yes
 
 Currently only the **INTL** region (`maimaidx-eng.com`) is supported.
+
+Chart videos and chart data for `/cc-chart` come from [mai-notes.com](https://mai-notes.com/) (maiノーツ), a community maimai chart database — the video is its own player, driven headlessly and recorded.
 
 ## Quickstart
 
@@ -66,6 +69,13 @@ Ensure you have everything with:
 
 Get all the required modules with:
 `pip install -r requirements.txt`
+
+`/cc-chart` additionally needs a browser and ffmpeg, neither of which `pip` can provide on its own:
+
+* `python -m playwright install chromium` — ~95MB, and a *separate* step: `pip install playwright` only installs the Python client. On Linux you may also need `python -m playwright install-deps chromium` (requires root).
+* `ffmpeg` on your `PATH` — a system package (`brew install ffmpeg`, `apt install ffmpeg`, ...), not a Python one.
+
+Both are checked at runtime. Without them `/cc-chart` still answers, it just replies with the chart's stats instead of a video; every other command is unaffected.
 
 Run the bot once with `python main.py` - it will create a `config.json` for you and prompt you to fill in your bot token (and optionally your Discord user ID as `owner_id`) before continuing.
 

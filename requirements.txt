@@ -6,3 +6,5 @@ aiosqlite>=0.20
 cryptography>=42
 aiolimiter>=1.1
 Pillow>=10
+playwright>=1.44
+numpy>=1.26
