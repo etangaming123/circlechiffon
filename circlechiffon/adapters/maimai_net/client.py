@@ -87,6 +87,11 @@ _FRIEND_FANOUT_CONCURRENCY = 5
 # user does by hand when DX NET tells them the connection time expired.
 _TRANSIENT_RETRY_DELAYS = (1.0, 2.0)
 
+# Redirect hops refresh_session() will follow before giving up. The confirmed
+# live chain is three (gateway -> ?ssid= -> home), so this leaves headroom
+# without letting a misbehaving redirect loop run away.
+_MAX_REFRESH_REDIRECTS = 6
+
 
 class MaimaiNetClient:
     def __init__(self, cookies: list[dict] | None = None):
@@ -129,6 +134,22 @@ class MaimaiNetClient:
             follow_redirects=False,
             timeout=15.0,
         )
+        # Single-flight guard for refresh_session(). Several methods fan out
+        # concurrent _get_page calls over this one jar (get_music_scores
+        # fires one per difficulty, get_friends_chart_scores up to
+        # _FRIEND_FANOUT_CONCURRENCY, cogs/profile.py gathers three
+        # authenticated fetches at once), so an eviction is discovered by
+        # several tasks at the same moment. Without this they would each
+        # re-mint, and because DX NET only keeps one session per account
+        # they would evict *each other*. Callers snapshot the generation
+        # before taking the lock and re-check it after; whoever loses the
+        # race just retries on the session the winner minted.
+        self._refresh_lock = asyncio.Lock()
+        self._refresh_generation = 0
+        # Set once a re-mint has actually happened, so accounts.with_client
+        # knows the jar is worth persisting - a fresh userId that dies with
+        # the client would leave the stored cookie dead for the next command.
+        self.session_refreshed = False
 
     async def __aenter__(self) -> "MaimaiNetClient":
         return self
@@ -237,6 +258,83 @@ class MaimaiNetClient:
         if is_maintenance(home_resp.text):
             raise MaintenanceError("maimai DX NET is currently under maintenance.")
 
+    def _has_clal(self) -> bool:
+        """True if the jar still holds the SEGA Aime persistent login token."""
+        return any(
+            c.name == urls.PERSISTENT_LOGIN_COOKIE and urls.AIME_GATEWAY_HOST in (c.domain or "")
+            for c in self._client.cookies.jar
+        )
+
+    async def refresh_session(self) -> bool:
+        """Re-mint the maimaidx-eng.com session from the SEGA Aime `clal`
+        cookie, with no password and no user interaction.
+
+        maimai DX NET keeps exactly one live `userId` per account, so anything
+        else touching the same account - most often the user's own browser tab
+        - silently evicts the bot's session. `clal` is the gateway's
+        persistent login token (minted by the `retention: "1"` field login()
+        already posts, and confirmed live to outlive the session by decades),
+        so the whole gateway hop can simply be replayed to get a new session
+        back. Confirmed live end to end:
+
+            GET  common_auth/login?site_id=maimaidxex
+              -> 302 maimai-mobile/?ssid=<one-time token>
+              -> 302 maimai-mobile/home/
+              -> 200, a new userId in the jar
+
+        Returns True if a working session was minted. Never raises: every
+        failure returns False so callers can fall back to a full re-login.
+        """
+        if not self._has_clal():
+            return False
+
+        try:
+            url = urls.INTL["LOGIN_PAGE"]
+            for _ in range(_MAX_REFRESH_REDIRECTS):
+                resp = await self._get(url)
+                if not resp.is_redirect:
+                    break
+                location = resp.headers.get("location")
+                if not location:
+                    return False
+                url = str(resp.url.join(location))
+            else:
+                # still bouncing after the hop cap - treat as a failure rather
+                # than following DX NET into a loop
+                return False
+
+            # A good clal redirects off the gateway and onto maimaidx-eng.com.
+            # Coming to rest still on the gateway means it's spent (password
+            # changed, sessions revoked) and it's showing the credential form.
+            if urls.is_gateway_url(resp.url):
+                return False
+
+            # prove it actually worked rather than trusting the hop chain:
+            # a dead clal still redirects, it just lands somewhere useless
+            home = await self._get(urls.INTL["HOME_PAGE"])
+            if home.is_redirect:
+                return False
+            if is_maintenance(home.text) or is_error_page(home.text):
+                return False
+        except httpx.HTTPError:
+            return False
+
+        self.session_refreshed = True
+        return True
+
+    async def _refresh_session_once(self, generation: int) -> bool:
+        """Single-flight wrapper around refresh_session(). `generation` is the
+        value read *before* the caller decided a refresh was needed; if it has
+        moved by the time the lock is acquired, someone else already re-minted
+        and the caller should just retry rather than evicting their session."""
+        async with self._refresh_lock:
+            if generation != self._refresh_generation:
+                return True
+            if not await self.refresh_session():
+                return False
+            self._refresh_generation += 1
+            return True
+
     async def _classify_error_page(self, error_url, html: str | None = None) -> MaimaiNetError:
         """Decide *why* maimai DX NET sent us to its error page.
 
@@ -272,6 +370,13 @@ class MaimaiNetClient:
         ):
             return SessionExpired("Your maimai DX NET session has expired. Please /cc-login again.")
 
+        # Known-permanent codes: a retry and a re-mint are both pointless, so
+        # report DX NET's own wording now rather than after ~3s of attempts.
+        if code in urls.PERMANENT_ERROR_CODES:
+            return MaimaiNetError(
+                f"{urls.PERMANENT_ERROR_CODES[code]}{(' ' + detail) if detail else ''}"
+            )
+
         if is_transient_error(html):
             return TransientNetError(
                 "maimai DX NET is busy right now - please run that command again in a moment."
@@ -281,6 +386,17 @@ class MaimaiNetClient:
                 # wedged-but-live session recovers from and a dead one never
                 # does. Retry either way; _get_page decides which it was.
                 session_suspect=code in urls.SESSION_SUSPECT_ERROR_CODES,
+            )
+
+        if code in urls.SESSION_SUSPECT_ERROR_CODES:
+            # e.g. 200004 INVALID_SESSION, which doesn't carry the
+            # "try again later" wording 200002 does but wants the same
+            # handling: retry, then re-mint from clal.
+            return TransientNetError(
+                "maimai DX NET dropped the session - reconnecting."
+                + (f" {detail}" if detail else ""),
+                code=code,
+                session_suspect=True,
             )
 
         # Unrecognized code. Retry it: an unknown error page is far more
@@ -333,6 +449,29 @@ class MaimaiNetClient:
         MaintenanceError propagate on the first attempt exactly as before, so
         no latency is added to either of those paths."""
         last: TransientNetError | None = None
+        # snapshot before the first attempt so a refresh that another task
+        # performs while we're mid-flight is noticed rather than repeated
+        generation = self._refresh_generation
+        # one re-mint per _get_page call, shared by all three places that can
+        # reach for it below - a second would only evict the session the first
+        # just minted
+        reminted = False
+
+        async def remint_and_retry() -> str | None:
+            """Mint a session from clal and re-run the fetch. None if there's
+            nothing to mint from, or the fetch failed again."""
+            nonlocal reminted, generation, last
+            if reminted:
+                return None
+            reminted = True
+            if not await self._refresh_session_once(generation):
+                return None
+            generation = self._refresh_generation
+            try:
+                return await self._fetch_page(url)
+            except TransientNetError as e:
+                last = e
+                return None
 
         for attempt in range(len(_TRANSIENT_RETRY_DELAYS) + 1):
             if attempt:
@@ -354,6 +493,13 @@ class MaimaiNetClient:
                         if home_resp.is_redirect:
                             location = home_resp.url.join(home_resp.headers.get("location") or "")
                             if urls.is_landing_page_url(location) or "common_auth" in str(location):
+                                # Session confirmed gone. Before giving up,
+                                # try to mint a new one straight from clal -
+                                # this is the usual browser-collision case,
+                                # and it recovers without a password.
+                                recovered = await remint_and_retry()
+                                if recovered is not None:
+                                    return recovered
                                 raise SessionExpired(
                                     "Your maimai DX NET session has expired. Please /cc-login again."
                                 ) from last
@@ -362,12 +508,26 @@ class MaimaiNetClient:
             except TransientNetError as e:
                 last = e
 
+            if last.session_suspect:
+                # The session isn't usable, and DX NET evicts one the moment
+                # anything else logs into the account - the user's own browser
+                # tab, most often. Waiting out the backoff ladder first just
+                # makes the user watch it: mint a replacement now. A fresh
+                # session also fixes the merely-wedged case a plain refresh
+                # would have cleared, so nothing is lost by not waiting.
+                recovered = await remint_and_retry()
+                if recovered is not None:
+                    return recovered
+
         assert last is not None
         if last.session_suspect:
-            # never cleared, so treat it as a dead session after all - this
-            # is what routes a genuinely expired cookie to with_client's
-            # silent re-login (or the /cc-login message) instead of leaving
-            # the user with a "busy, try again" that would never come right.
+            # Never cleared, so the session is dead rather than wedged. Mint a
+            # replacement from clal and run the request once more; only if
+            # that fails too does this become a user-visible expiry, routed to
+            # with_client's password re-login or the /cc-login message.
+            recovered = await remint_and_retry()
+            if recovered is not None:
+                return recovered
             raise SessionExpired(
                 "Your maimai DX NET session has expired. Please /cc-login again."
             ) from last

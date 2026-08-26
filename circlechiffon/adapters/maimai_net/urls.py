@@ -52,6 +52,28 @@ def trophy_plate_url(title_tier: str | None) -> str | None:
     return f"{IMG_BASE}trophy_{tier}.png"
 
 
+AIME_GATEWAY_HOST = "lng-tgk-aime-gw.am-all.net"
+
+# SEGA Aime's persistent login token, set on the gateway host. Confirmed live
+# from a real linked account: it is the one durable thing in the jar (its
+# expiry lands in 2094, against maimaidx-eng.com's `userId`, which is a plain
+# session cookie with no expiry at all), and it is what the `retention: "1"`
+# field in login()'s POST buys. Replaying the gateway login hop while holding
+# it mints a brand-new userId with no password - see
+# MaimaiNetClient.refresh_session().
+PERSISTENT_LOGIN_COOKIE = "clal"
+
+
+def is_gateway_url(url) -> bool:
+    """True if a URL is on the SEGA Aime gateway host.
+
+    Used to spot a spent `clal`: a good one redirects off the gateway and onto
+    maimaidx-eng.com, so a hop chain that comes to rest still on the gateway
+    means we're being shown the credential form and only a real re-login
+    will do."""
+    return str(getattr(url, "host", "") or url).find(AIME_GATEWAY_HOST) != -1
+
+
 # Matched on the *path* of a resolved Location header rather than by exact
 # equality against a single absolute URL. Confirmed live: a stale/garbage `userId`
 # cookie on /playerData/ 302s to exactly
@@ -113,6 +135,37 @@ SESSION_EXPIRED_ERROR_STRINGS = [
 # /cc-login path (or with_client's silent re-login) instead of being reported
 # as "busy" forever.
 SESSION_SUSPECT_ERROR_CODES = {"200002"}
+
+# Codes below are NOT confirmed live here - they come from chuni-penguin's
+# enumeration for CHUNITHM-NET
+# (https://github.com/beer-psi/chuni-penguin, adapters/chunithm_net/errors.py),
+# a sibling service on the same SEGA web framework. Treated as best-effort:
+# 100001 and 200002 in that table match what was confirmed live against maimai
+# DX NET exactly, so the rest very likely transfers, but each is only used
+# where acting on it is strictly better than the unknown-code default of
+# "retry three times, then report".
+#
+#   100101  LOGIN_FAILURE          200001  RATE_LIMIT_EXCEEDED
+#   100106  OLD_GAME_PROFILE       200004  INVALID_SESSION
+#   120202  INVALID_ACCESS         200012  PROFILE_BANNED
+#                                  200020  NOT_FOUND
+#
+# Note 200001 being an explicit rate-limit code right next to 200002: it is
+# suggestive that this family is about request rate, not session count.
+
+# Another "your session is not usable", same handling as 200002: retry, and
+# re-mint from clal rather than reporting a dead session.
+SESSION_SUSPECT_ERROR_CODES |= {"200004"}
+
+# Nothing a retry or a re-mint can fix. Reported immediately with DX NET's own
+# wording instead of costing the user three attempts and ~3s first.
+PERMANENT_ERROR_CODES = {
+    "100101": "maimai DX NET rejected the login.",
+    "100106": "That SEGA ID's maimai profile is from an older version and can't be read.",
+    "120202": "maimai DX NET refused the request (invalid access).",
+    "200012": "That maimai DX NET profile is banned.",
+    "200020": "maimai DX NET couldn't find that page or record.",
+}
 
 # Matched against the error page body. "try again later" is the load-bearing
 # one - it catches SEGA's actual wording, "The connection time has been

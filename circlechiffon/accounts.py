@@ -17,6 +17,9 @@ from circlechiffon.database import engine as db_engine
 from circlechiffon.database.models import Account
 
 
+_FAILED = object()  # sentinel: `operation` may legitimately return None
+
+
 class NotLinked(Exception):
     """Raised by with_client() when the Discord user has no linked account."""
 
@@ -77,6 +80,30 @@ async def _get_credentials(discord_id: int) -> tuple[str, str] | None:
         return data["sega_id"], data["password"]
 
 
+async def refresh_session(discord_id: int) -> MaimaiNetClient | None:
+    """Mint a fresh maimai DX NET session from the stored SEGA Aime `clal`
+    cookie, with no password involved, and persist it.
+
+    This is the cheap recovery path, and the one that covers the common case:
+    DX NET allows a single live session per account, so the user opening the
+    site in their own browser silently evicts the bot. `clal` outlives the
+    session by decades, so the gateway hop can just be replayed - see
+    MaimaiNetClient.refresh_session(). Unlike reauth() this needs no stored
+    password, so it works for every linked account, not just the ones that
+    opted into remember_password.
+
+    Returns None if there's no linked account, no usable `clal`, or the
+    gateway declined - callers should fall back to reauth()."""
+    client = await get_client(discord_id)
+    if client is None:
+        return None
+    if not await client.refresh_session():
+        await client.close()
+        return None
+    await save_session(discord_id, client)
+    return client
+
+
 async def reauth(discord_id: int) -> MaimaiNetClient | None:
     """Attempt to silently re-login using stored SEGA ID credentials (only
     present if the user opted into remember_password), saving the refreshed
@@ -104,26 +131,56 @@ async def with_client(
     operation,
     on_retry: Callable[[], Awaitable[None]] | None = None,
 ):
-    """Run `operation(client)` against the user's linked account. If the
-    stored session has expired and the user opted into remember_password,
-    transparently re-logs in and retries `operation` once with the fresh
-    session. If `on_retry` is given, it's awaited right before that
-    re-login attempt actually starts - but only when we've confirmed
-    credentials are stored, so callers never flash a "retrying" message
-    for users who are about to hard-fail with no stored credentials at
-    all. Raises NotLinked if the user has no linked account at all, or
-    re-raises SessionExpired if the session expired and either no
-    credentials are stored or the silent re-login failed."""
+    """Run `operation(client)` against the user's linked account, recovering
+    from an expired session without troubling the user where possible.
+
+    Recovery is tried in cost order. The client itself re-mints from `clal`
+    mid-command when it can (see MaimaiNetClient.refresh_session); if the
+    operation still comes back expired, refresh_session() mints a fresh
+    session from `clal` and retries - no password, so this works for every
+    linked account. Only when `clal` is spent does it fall back to reauth(),
+    a full password re-login, which needs remember_password.
+
+    If `on_retry` is given it's awaited just before that password re-login -
+    but only when credentials are actually stored, so users about to
+    hard-fail never see a "retrying" message. The `clal` path is silent,
+    since it's fast and usually invisible.
+
+    Raises NotLinked if there's no linked account, or SessionExpired if every
+    recovery path failed."""
     client = await get_client(discord_id)
     if client is None:
         raise NotLinked()
 
     try:
-        return await operation(client)
+        result = await operation(client)
     except SessionExpired:
-        pass
+        result = _FAILED
     finally:
+        # The client re-mints from `clal` on its own when DX NET evicts the
+        # session mid-command. That new userId only lives in this client's
+        # jar, so persist it or the next command starts from a cookie we
+        # already know is dead. Only written when a re-mint actually
+        # happened - a normal command still costs no DB write.
+        if client.session_refreshed:
+            await save_session(discord_id, client)
         await client.close()
+
+    if result is not _FAILED:
+        return result
+
+    # Cheapest recovery first: a new session straight from `clal`, no
+    # password needed and available to every linked account. Only if that
+    # fails (clal spent - password changed, sessions revoked) do we fall
+    # back to a full re-login, which needs remember_password.
+    refreshed = await refresh_session(discord_id)
+    if refreshed is not None:
+        try:
+            return await operation(refreshed)
+        except SessionExpired:
+            pass
+        finally:
+            await refreshed.close()
 
     if on_retry is not None and await has_stored_credentials(discord_id):
         await on_retry()

@@ -15,8 +15,12 @@ def _utcnow() -> datetime:
 class Account(Base):
     """A Discord user's linked maimai DX NET account.
 
-    `encrypted_cookie` holds a Fernet-encrypted serialized session (obtained
-    once via /cc-login and refreshed in place as it's used).
+    `encrypted_cookie` holds a Fernet-encrypted serialized session: the whole
+    cookie jar, across both the SEGA Aime gateway and maimaidx-eng.com. It is
+    written by /cc-login, and rewritten whenever the session is re-minted from
+    the gateway's persistent `clal` token (see accounts.refresh_session) or a
+    full re-login. Note that an ordinary command does NOT write it back, so
+    cookies the server rotates mid-command are still discarded.
 
     `encrypted_credentials`, if present, holds a Fernet-encrypted JSON object
     of {"sega_id": ..., "password": ...} - only stored when the user
