@@ -10,6 +10,7 @@ from discord.ext import commands
 from circlechiffon import access, accounts, badge_emojis, embed_colors
 from circlechiffon.adapters.dxrating.images import get_jackets_bulk
 from circlechiffon.adapters.maimai_net.badge_icons import get_all_badge_icons
+from circlechiffon.adapters.maimai_site.version_logo import get_version_logo
 from circlechiffon.adapters.maimai_net.errors import MaimaiNetError, SessionExpired
 from circlechiffon.ratingcalc.best50 import calculate_best50
 from circlechiffon.ratingcalc.calculator import calculate_rating, rank_tag_for_achievement
@@ -410,6 +411,7 @@ class RecordsCog(commands.Cog):
                 if image_name in jackets_by_image_name
             }
             badge_icons = await get_all_badge_icons()
+            version_logo_bytes = await get_version_logo()
 
             # B15 eligibility window (see calculate_best50) is normally
             # {current_version, previous_version} - name it after the
@@ -435,6 +437,7 @@ class RecordsCog(commands.Cog):
                 b15_version_label=b15_version_label,
                 jackets_by_title=jackets_by_title,
                 badge_icons=badge_icons,
+                version_logo_bytes=version_logo_bytes,
                 output=buf,
             )
 
