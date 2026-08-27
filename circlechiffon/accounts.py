@@ -216,3 +216,26 @@ async def is_linked(discord_id: int) -> bool:
     async with db_engine.session() as session:
         account = await session.get(Account, discord_id)
         return account is not None
+
+
+async def get_display_name(discord_id: int) -> str | None:
+    """The maimai DX NET display name recorded for this account at login
+    (cogs/auth.py), or None if it was never captured - login stores it
+    best-effort and swallows a failed profile fetch. Reading it here is free
+    (no request to SEGA), which is the whole point: commands that just want
+    to label an embed with the player's name shouldn't cost a page fetch."""
+    async with db_engine.session() as session:
+        account = await session.get(Account, discord_id)
+        return account.display_name if account is not None else None
+
+
+async def set_display_name(discord_id: int, name: str) -> None:
+    """Backfills the display name for an account that never got one, so the
+    profile fetch that recovered it only has to happen once. Deliberately not
+    routed through save_session(), which would re-encrypt the session cookie
+    for no reason."""
+    async with db_engine.session() as session:
+        account = await session.get(Account, discord_id)
+        if account is not None:
+            account.display_name = name
+            await session.commit()

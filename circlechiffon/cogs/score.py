@@ -9,9 +9,19 @@ from circlechiffon.adapters.dxrating.images import jacket_url
 from circlechiffon.adapters.maimai_net.errors import MaimaiNetError, SessionExpired
 from circlechiffon.ratingcalc.calculator import rank_tag_for_achievement
 from circlechiffon.songdata.catalog import get_catalog
-from circlechiffon.types import Difficulty, Score, Song, SongPlayStats
+from circlechiffon.types import Difficulty, FriendEntry, Score, Song, SongPlayStats
 
 _DIFFICULTY_ORDER = [Difficulty.basic, Difficulty.advanced, Difficulty.expert, Difficulty.master, Difficulty.remaster]
+
+# Friend score pages carry far less than your own record pages do - see
+# parse_friend_scores: achievement, combo and sync flags only, with no raw DX
+# score, no rating, and no idx to reach a musicDetail page for play counts.
+# _score_embed already omits each of those when absent, so this footer is the
+# only thing that has to explain the gap.
+_FRIEND_DATA_NOTE = (
+    "Friend scores show achievement and combo/sync only - SEGA doesn't expose "
+    "DX score, rating, or play counts for friends."
+)
 
 
 class NoScoresRecorded(Exception):
@@ -29,7 +39,12 @@ def _matching_scores(scores: list[Score], title: str, difficulty: Difficulty) ->
 
 
 def _score_embed(
-    song: Song, difficulty: Difficulty, scores: list[Score], play_stats: dict[Difficulty, SongPlayStats]
+    song: Song,
+    difficulty: Difficulty,
+    scores: list[Score],
+    play_stats: dict[Difficulty, SongPlayStats],
+    player_name: str,
+    footer_note: str | None = None,
 ) -> discord.Embed:
     matches = _matching_scores(scores, song.title, difficulty)
     if matches:
@@ -39,11 +54,17 @@ def _score_embed(
         color = embed_colors.difficulty_color(difficulty)
 
     embed = discord.Embed(title=f"{song.title} [{difficulty.display_name}]", color=color)
+    # whose scores these are, rendered on the small author line above the
+    # title so the song stays the heading. Plain text, so every </> rebuild
+    # (each of which builds a fresh embed) keeps it.
+    embed.set_author(name=f"{player_name}'s scores")
     # dxrating's jacket CDN is a public, cacheable asset host - linked
     # directly rather than fetched+attached, so it survives every </> toggle
     # (each rebuilds a fresh embed) without needing to re-attach a file.
     if song.image_name:
         embed.set_thumbnail(url=jacket_url(song.image_name))
+    if footer_note:
+        embed.set_footer(text=footer_note)
     if not matches:
         embed.description = "No play recorded on this difficulty yet."
         return embed
@@ -82,6 +103,8 @@ class ScoreToggleView(discord.ui.View):
         scores: list[Score],
         difficulties: list[Difficulty],
         play_stats: dict[Difficulty, SongPlayStats],
+        player_name: str,
+        footer_note: str | None = None,
     ):
         super().__init__(timeout=30)
         self.invoker_id = invoker_id
@@ -89,6 +112,8 @@ class ScoreToggleView(discord.ui.View):
         self.scores = scores
         self.difficulties = difficulties
         self.play_stats = play_stats
+        self.player_name = player_name
+        self.footer_note = footer_note
         self.index = len(difficulties) - 1  # default: highest available difficulty
         self.message: discord.Message | discord.InteractionMessage | None = None
         self._update_buttons()
@@ -98,7 +123,14 @@ class ScoreToggleView(discord.ui.View):
         self.next.disabled = self.index == len(self.difficulties) - 1
 
     def embed(self) -> discord.Embed:
-        return _score_embed(self.song, self.difficulties[self.index], self.scores, self.play_stats)
+        return _score_embed(
+            self.song,
+            self.difficulties[self.index],
+            self.scores,
+            self.play_stats,
+            self.player_name,
+            self.footer_note,
+        )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.invoker_id:
@@ -133,44 +165,73 @@ class ScoreToggleView(discord.ui.View):
 async def build_score_view(
     invoker_id: int,
     song: Song,
+    *,
+    friend: FriendEntry | None = None,
     on_retry: Callable[[], Awaitable[None]] | None = None,
+    on_progress: Callable[[str], Awaitable[None]] | None = None,
 ) -> ScoreToggleView | None:
-    """Fetches the invoker's scores and builds a ScoreToggleView defaulted
-    to the song's highest available difficulty. Returns None if the song
-    has no standard-difficulty charts. Propagates the usual account/session
-    errors (NotLinked/SessionExpired/MaimaiNetError) for the caller to
-    handle in whatever way fits its own command's UI."""
+    """Fetches scores for one song and builds a ScoreToggleView defaulted to
+    the song's highest available difficulty. With `friend` given, the scores
+    are that friend's rather than the invoker's - the invoker's own session
+    is still what fetches them, so the account/session errors below are the
+    same either way. Returns None if the song has no standard-difficulty
+    charts. Propagates the usual account/session errors
+    (NotLinked/SessionExpired/MaimaiNetError) for the caller to handle in
+    whatever way fits its own command's UI."""
     difficulties = available_difficulties(song)
     if not difficulties:
         return None
 
     async def fetch(client):
+        if friend is not None:
+            # No idx on a friend's score rows, so musicDetail (and with it
+            # play counts) is unreachable for anyone but yourself.
+            scores = await client.get_friend_scores(friend.idx, on_progress=on_progress)
+            return scores, {}, friend.profile.display_name
+
         scores = await client.get_music_scores()
         # any one of this song's score rows carries an idx that reaches the
         # same musicDetail page - it covers every difficulty at once, so one
         # extra fetch here is enough regardless of which difficulty is shown.
         idx = next((s.idx for s in scores if s.title == song.title and s.idx), None)
         play_stats = await client.get_song_play_stats(idx) if idx is not None else {}
-        return scores, play_stats
+        # normally free - login records the name - but an account whose login
+        # couldn't read its profile has none stored, so recover it once here.
+        name = await accounts.get_display_name(invoker_id)
+        if not name:
+            name = (await client.get_profile()).display_name
+            await accounts.set_display_name(invoker_id, name)
+        return scores, play_stats, name
 
-    scores, play_stats = await accounts.with_client(invoker_id, fetch, on_retry=on_retry)
+    scores, play_stats, player_name = await accounts.with_client(invoker_id, fetch, on_retry=on_retry)
 
     scored_difficulties = [d for d in difficulties if _matching_scores(scores, song.title, d)]
     if not scored_difficulties:
         raise NoScoresRecorded()
 
-    return ScoreToggleView(invoker_id, song, scores, scored_difficulties, play_stats)
+    return ScoreToggleView(
+        invoker_id,
+        song,
+        scores,
+        scored_difficulties,
+        play_stats,
+        player_name,
+        _FRIEND_DATA_NOTE if friend is not None else None,
+    )
 
 
 class ScoreCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @app_commands.command(name="cc-scores", description="View your score on a song, by difficulty")
-    @app_commands.describe(title="Song title (or part of it, including aliases) to search for")
+    @app_commands.command(name="cc-scores", description="View your (or a friend's) score on a song, by difficulty")
+    @app_commands.describe(
+        title="Song title (or part of it, including aliases) to search for",
+        friend="Friend's display name (or their exact id from /cc-friends show_ids:True). Omit for your own scores.",
+    )
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-    async def score(self, interaction: discord.Interaction, title: str):
+    async def score(self, interaction: discord.Interaction, title: str, friend: str | None = None):
         if not await access.handle_command_access(interaction, interaction.user.id, "cc-scores", access.MAIMAI_NET_COOLDOWN):
             return
         await interaction.response.defer()
@@ -184,12 +245,88 @@ class ScoreCog(commands.Cog):
                 return
             song = results[0]
 
+            if friend is None:
+                await self._send_score_view(interaction, song)
+                return
+
+            # /cc-friend-profile's exact resolution flow, reused wholesale:
+            # normalized substring match, difflib fallback, and a dropdown
+            # when more than one friend matches. Imported lazily to keep the
+            # cogs free of module-load-time import cycles, same as the
+            # SongsCog autocomplete reuse below.
+            from circlechiffon.cogs.friends import FriendPickView, _pick_prompt, _resolve_friend_entry
+
+            async def resolve(client):
+                return await _resolve_friend_entry(client, friend)
+
+            resolved = await accounts.with_client(
+                interaction.user.id, resolve, on_retry=accounts.default_retry_notice(interaction)
+            )
+            if resolved is None:
+                await interaction.edit_original_response(content=f"No friend found matching `{friend}`.")
+                return
+            if isinstance(resolved, list):
+                async def on_pick(component_interaction: discord.Interaction, entry: FriendEntry):
+                    await self._send_score_view(component_interaction, song, friend=entry)
+
+                view = FriendPickView(interaction.user.id, resolved, on_pick)
+                await interaction.edit_original_response(content=_pick_prompt(resolved), view=view)
+                view.message = await interaction.original_response()
+                return
+
+            await self._send_score_view(interaction, song, friend=resolved)
+        except accounts.NotLinked:
+            await interaction.edit_original_response(
+                content="You haven't linked a maimai DX NET account yet. Run `/cc-login` first."
+            )
+        except SessionExpired as e:
+            await interaction.edit_original_response(content=str(e))
+        except MaimaiNetError as e:
+            await interaction.edit_original_response(content=f"Couldn't fetch those scores: {e}")
+        except Exception as e:
+            await interaction.edit_original_response(
+                content=f"Couldn't look up that song: unexpected error ({type(e).__name__}: {e})"
+            )
+
+    async def _send_score_view(
+        self, interaction: discord.Interaction, song: Song, friend: FriendEntry | None = None
+    ):
+        """Fetches the scores and edits `interaction`'s response with the
+        toggle view. Works from either the original slash-command interaction
+        (already deferred) or a FriendPickView select callback (already
+        responded to via edit_message) - hence `view=None` on every edit, so
+        a dropdown that led here is cleared rather than left hanging."""
+        whose = "your" if friend is None else f"**{friend.profile.display_name}**'s"
+
+        # a friend's scores are five separate pages, one per difficulty, so
+        # report them the way /cc-friend-best does rather than sitting on
+        # "Getting data..." for the whole fan-out.
+        on_progress = None
+        if friend is not None:
+            display_order = ["Re:MASTER", "MASTER", "EXPERT", "ADVANCED", "BASIC"]
+            done: set[str] = set()
+
+            async def report_progress(diff_label: str) -> None:
+                done.add(diff_label)
+                lines = [
+                    f"Fetching {label} Charts... ✅" if label in done else f"Fetching {label} Charts..."
+                    for label in display_order
+                ]
+                await interaction.edit_original_response(content="\n".join(lines), view=None)
+
+            on_progress = report_progress
+
+        try:
             view = await build_score_view(
-                interaction.user.id, song, on_retry=accounts.default_retry_notice(interaction)
+                interaction.user.id,
+                song,
+                friend=friend,
+                on_retry=accounts.default_retry_notice(interaction),
+                on_progress=on_progress,
             )
             if view is None:
                 await interaction.edit_original_response(
-                    content=f"**{song.title}** has no standard-difficulty charts to show."
+                    content=f"**{song.title}** has no standard-difficulty charts to show.", view=None
                 )
                 return
 
@@ -197,17 +334,20 @@ class ScoreCog(commands.Cog):
             view.message = message
         except accounts.NotLinked:
             await interaction.edit_original_response(
-                content="You haven't linked a maimai DX NET account yet. Run `/cc-login` first."
+                content="You haven't linked a maimai DX NET account yet. Run `/cc-login` first.", view=None
             )
         except SessionExpired as e:
-            await interaction.edit_original_response(content=str(e))
+            await interaction.edit_original_response(content=str(e), view=None)
         except NoScoresRecorded:
-            await interaction.edit_original_response(content="You don't have any scores for that chart...")
+            subject = "You don't" if friend is None else f"**{friend.profile.display_name}** doesn't"
+            await interaction.edit_original_response(
+                content=f"{subject} have any scores for that chart...", view=None
+            )
         except MaimaiNetError as e:
-            await interaction.edit_original_response(content=f"Couldn't fetch your scores: {e}")
+            await interaction.edit_original_response(content=f"Couldn't fetch {whose} scores: {e}", view=None)
         except Exception as e:
             await interaction.edit_original_response(
-                content=f"Couldn't look up that song: unexpected error ({type(e).__name__}: {e})"
+                content=f"Couldn't fetch {whose} scores: unexpected error ({type(e).__name__}: {e})", view=None
             )
 
     @score.autocomplete("title")
