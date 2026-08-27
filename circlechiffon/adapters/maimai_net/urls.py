@@ -17,8 +17,10 @@ INTL = {
     "MUSIC_DETAIL_PAGE": "https://maimaidx-eng.com/maimai-mobile/record/musicDetail/",
     "CIRCLE_PAGE": "https://maimaidx-eng.com/maimai-mobile/circle/",
     "CIRCLE_MEMBER_PAGE": "https://maimaidx-eng.com/maimai-mobile/circle/circleMember/",
+    "ICON_PAGE": "https://maimaidx-eng.com/maimai-mobile/collection/",
     "NAMEPLATE_PAGE": "https://maimaidx-eng.com/maimai-mobile/collection/nameplate/",
     "FRAME_PAGE": "https://maimaidx-eng.com/maimai-mobile/collection/frame/",
+    "TROPHY_PAGE": "https://maimaidx-eng.com/maimai-mobile/collection/trophy/",
     "TOUR_MEMBER_PAGE": "https://maimaidx-eng.com/maimai-mobile/collection/character/",
     "FRIEND_LIST_PAGE": "https://maimaidx-eng.com/maimai-mobile/friend/",
     # confirmed live: paginates at 10/page - caller appends
@@ -34,6 +36,65 @@ INTL = {
 }
 
 IMG_BASE = "https://maimaidx-eng.com/maimai-mobile/img/"
+
+# The four collection categories the site can actually equip from the web,
+# each: the "ALL" listing page (its genre <select> defaults to 0=ALL, so one
+# GET lists everything owned), the POST endpoint that equips one of them, and
+# the img/ subdirectory its artwork lives under - that last one both locates
+# the item's <img> in a block and, via the filename stem, gives the stable
+# key a preset is stored by. `character` (TOUR MEMBER) is absent on purpose:
+# that page carries no <form> at all, so it can't be set from the web.
+COLLECTION_SLOTS = {
+    "icon": {
+        "page": INTL["ICON_PAGE"],
+        "set": "https://maimaidx-eng.com/maimai-mobile/collection/set/",
+        "img_dir": "/img/Icon/",
+        "label": "Icon",
+    },
+    "nameplate": {
+        "page": INTL["NAMEPLATE_PAGE"],
+        "set": "https://maimaidx-eng.com/maimai-mobile/collection/nameplate/set/",
+        "img_dir": "/img/NamePlate/",
+        "label": "Name plate",
+    },
+    "frame": {
+        "page": INTL["FRAME_PAGE"],
+        "set": "https://maimaidx-eng.com/maimai-mobile/collection/frame/set/",
+        "img_dir": "/img/Frame/",
+        "label": "Frame",
+    },
+    "trophy": {
+        "page": INTL["TROPHY_PAGE"],
+        "set": "https://maimaidx-eng.com/maimai-mobile/collection/trophy/set/",
+        "img_dir": None,
+        "label": "Title",
+        # Titles are the one category split across pages: the listing is
+        # tabbed by rarity (confirmed live - the default page holds only the
+        # Normal ones, ?rare=1..4 the rest), and every tab repeats the
+        # "SETTING" box and the two RANDOM pseudo-entries. The tier is part
+        # of a title's key, so the right tab is known without searching.
+        "tier_pages": {
+            "trophy_Normal": INTL["TROPHY_PAGE"],
+            "trophy_Bronze": INTL["TROPHY_PAGE"] + "?rare=1",
+            "trophy_Silver": INTL["TROPHY_PAGE"] + "?rare=2",
+            "trophy_Gold": INTL["TROPHY_PAGE"] + "?rare=3",
+            "trophy_Rainbow": INTL["TROPHY_PAGE"] + "?rare=4",
+        },
+    },
+}
+
+
+def collection_pages(slot: str, key: str) -> list[str]:
+    """The listing pages to search for `key`, best guess first."""
+    conf = COLLECTION_SLOTS[slot]
+    tier_pages = conf.get("tier_pages")
+    if not tier_pages:
+        return [conf["page"]]
+    first = tier_pages.get(key.split("|", 1)[0])
+    rest = [p for p in tier_pages.values() if p != first]
+    return ([first] if first else []) + rest
+
+COLLECTION_SLOT_ORDER = ("icon", "nameplate", "frame", "trophy")
 
 # .trophy_block's title banner is a stylesheet-level `background-image`
 # rather than an <img>, so it can't be scraped out of the page markup -

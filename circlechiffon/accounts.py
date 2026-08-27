@@ -14,7 +14,7 @@ import crypto_utils
 from circlechiffon.adapters.maimai_net.client import MaimaiNetClient
 from circlechiffon.adapters.maimai_net.errors import MaimaiNetError, SessionExpired
 from circlechiffon.database import engine as db_engine
-from circlechiffon.database.models import Account
+from circlechiffon.database.models import Account, CollectionPreset
 
 
 _FAILED = object()  # sentinel: `operation` may legitimately return None
@@ -208,6 +208,7 @@ def default_retry_notice(interaction: discord.Interaction) -> Callable[[], Await
 async def delete_account(discord_id: int) -> bool:
     async with db_engine.session() as session:
         result = await session.execute(delete(Account).where(Account.discord_id == discord_id))
+        await session.execute(delete(CollectionPreset).where(CollectionPreset.discord_id == discord_id))
         await session.commit()
         return result.rowcount > 0
 

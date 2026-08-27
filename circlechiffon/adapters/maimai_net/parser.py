@@ -20,6 +20,7 @@ from circlechiffon.types import (
     ProfileExtras,
     RecentScore,
     Score,
+    CollectionItem,
     SongPlayStats,
     SyncFlag,
     TicketEntry,
@@ -910,6 +911,92 @@ def parse_equipped_collection_image(html: str, selector: str) -> str | None:
     tree = LexborHTMLParser(html)
     node = tree.css_first(selector)
     return node.attributes.get("src") if node is not None else None
+
+
+def _collection_block(node: LexborNode) -> LexborNode | None:
+    while node is not None:
+        classes = (node.attributes.get("class") or "").split()
+        if "see_through_block" in classes:
+            return node
+        node = node.parent
+    return None
+
+
+def _collection_item(block: LexborNode, slot: str, idx: str | None) -> CollectionItem | None:
+    img_dir = urls.COLLECTION_SLOTS[slot]["img_dir"]
+    if img_dir is None:
+        plate = block.css_first(".collection_trophy_block")
+        inner = block.css_first(".trophy_inner_block")
+        if plate is None or inner is None:
+            return None
+        tier = next(
+            (c for c in (plate.attributes.get("class") or "").split() if c.startswith("trophy_")),
+            "",
+        )
+        label = inner.text(strip=True)
+        if not label:
+            return None
+        return CollectionItem(key=f"{tier}|{label}", label=label, idx=idx)
+
+    src = next(
+        (
+            src
+            for img in block.css("img")
+            if img_dir in (src := img.attributes.get("src") or "")
+        ),
+        None,
+    )
+    if src is None:
+        return None
+    name_node = block.css_first(".f_14")
+    return CollectionItem(
+        key=src.rsplit("/", 1)[-1],
+        label=name_node.text(strip=True) if name_node is not None else src.rsplit("/", 1)[-1],
+        image_url=src,
+        idx=idx,
+    )
+
+
+def parse_collection_items(html: str, slot: str) -> list[CollectionItem]:
+    """Every owned item on a collection listing page, in page order.
+
+    An item is a `.see_through_block` wrapping a `form[action$="/set/"]`; the
+    equipped one is skipped here because it has no such form (it's returned by
+    parse_equipped_collection_item instead). The ALL view repeats favourited
+    items at the top, so a key can legitimately appear twice - the duplicates
+    are the same item, and only their idx differs."""
+    tree = LexborHTMLParser(html)
+    set_url = urls.COLLECTION_SLOTS[slot]["set"]
+    items = []
+    for form in tree.css("form"):
+        if (form.attributes.get("action") or "") != set_url:
+            continue
+        idx_node = form.css_first('input[name="idx"]')
+        block = _collection_block(form)
+        if idx_node is None or block is None:
+            continue
+        item = _collection_item(block, slot, idx_node.attributes.get("value"))
+        if item is not None:
+            items.append(item)
+    return items
+
+
+def parse_equipped_collection_item(html: str, slot: str) -> CollectionItem | None:
+    """The item currently equipped in `slot`, from the "SETTING ..." box at the
+    top of its listing page - marked by `.collection_setting_block` and, unlike
+    every other block, carrying no set form."""
+    tree = LexborHTMLParser(html)
+    block = tree.css_first(".collection_setting_block")
+    return _collection_item(block, slot, None) if block is not None else None
+
+
+def parse_csrf_token(html: str) -> str | None:
+    """The `token` field every state-changing form on the page echoes back.
+    Confirmed live: identical for all forms on a page, and equal to the `_t`
+    cookie. Read from the markup rather than the jar so a page fetched before
+    a session re-mint can't hand back a stale pair."""
+    node = LexborHTMLParser(html).css_first('input[name="token"]')
+    return node.attributes.get("value") if node is not None else None
 
 
 def is_maintenance(html: str) -> bool:

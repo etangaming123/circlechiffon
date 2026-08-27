@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, DateTime, String, Text
+from sqlalchemy import BigInteger, DateTime, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -58,3 +58,23 @@ class BannedUser(Base):
     ncmd: Mapped[bool] = mapped_column(default=False)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     banned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class CollectionPreset(Base):
+    """One saved set of equipped collection items (icon / name plate / frame /
+    title) for a Discord user, in one of 5 numbered slots.
+
+    `items` is a JSON object of {slot_name: {"key": ..., "label": ...}}. The
+    key is the item's image filename for icon/nameplate/frame and
+    "<tier>|<text>" for a title - never the page's `idx`, which is a single-use
+    nonce and worthless a request later. Keeping all four in one JSON column
+    means adding a fifth equippable slot later needs no migration.
+    """
+
+    __tablename__ = "collection_presets"
+
+    discord_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    slot: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    items: Mapped[str] = mapped_column(Text, nullable=False)
+    saved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

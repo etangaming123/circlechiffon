@@ -10,6 +10,7 @@ from circlechiffon.adapters.maimai_net import urls
 from circlechiffon.adapters.maimai_net.errors import (
     AimeCardUnavailable,
     InvalidCredentials,
+    ItemNotOwned,
     MaintenanceError,
     MaimaiNetError,
     SessionExpired,
@@ -23,7 +24,10 @@ from circlechiffon.adapters.maimai_net.parser import (
     is_transient_error,
     parse_circle,
     parse_circle_members,
+    parse_collection_items,
+    parse_csrf_token,
     parse_equipped_collection_image,
+    parse_equipped_collection_item,
     parse_error_page,
     parse_friend_detail,
     parse_friend_list,
@@ -40,6 +44,7 @@ from circlechiffon.adapters.maimai_net.parser import (
 from circlechiffon.types import (
     Circle,
     CircleMember,
+    CollectionItem,
     Difficulty,
     FriendEntry,
     Judgements,
@@ -410,10 +415,14 @@ class MaimaiNetClient:
             code=code,
         )
 
-    async def _fetch_page(self, url: str) -> str:
+    async def _fetch_page(self, url: str, data: dict | None = None) -> str:
         """One attempt at fetching an authenticated page. Raises
-        TransientNetError for anything _get_page should retry."""
-        resp = await self._get(url)
+        TransientNetError for anything _get_page should retry.
+
+        `data` turns the attempt into a form POST; DX NET answers those with a
+        302 back to the page, and routes a rejected one through the same error
+        page a GET would get, so every check below applies unchanged."""
+        resp = await (self._post(url, data) if data is not None else self._get(url))
         text = resp.text
 
         if is_maintenance(text):
@@ -578,6 +587,57 @@ class MaimaiNetClient:
     async def get_leader_tour_member_url(self) -> str | None:
         html = await self._get_page(urls.INTL["TOUR_MEMBER_PAGE"])
         return parse_equipped_collection_image(html, ".chara_cycle_img")
+
+    async def get_equipped_collection_item(self, slot: str) -> CollectionItem | None:
+        html = await self._get_page(urls.COLLECTION_SLOTS[slot]["page"])
+        return parse_equipped_collection_item(html, slot)
+
+    async def set_collection_item(self, slot: str, key: str) -> str:
+        """Equip the item identified by `key` in `slot`. Returns "applied", or
+        "unchanged" when it was already equipped (no POST is sent).
+
+        The listing page has to be re-fetched here rather than reusing one the
+        caller already holds: `idx` and `token` are both minted per page load
+        (confirmed live - two fetches of one page share none of their idx
+        values), so a POST can only carry the pair from the GET that preceded
+        it. That is also why a failed POST restarts from the GET instead of
+        being retried on its own.
+        """
+        conf = urls.COLLECTION_SLOTS[slot]
+        for attempt in range(2):
+            item = None
+            for page in urls.collection_pages(slot, key):
+                html = await self._get_page(page)
+
+                equipped = parse_equipped_collection_item(html, slot)
+                if equipped is not None and equipped.key == key:
+                    return "unchanged"
+
+                item = next((i for i in parse_collection_items(html, slot) if i.key == key), None)
+                if item is not None and item.idx:
+                    break
+            else:
+                item = None
+
+            if item is None:
+                raise ItemNotOwned(f"that {conf['label'].lower()} isn't in your collection any more")
+            token = parse_csrf_token(html)
+            if not token:
+                raise UnexpectedResponse(f"no CSRF token on the {slot} collection page")
+
+            try:
+                await self._fetch_page(conf["set"], data={"idx": item.idx, "token": token})
+            except TransientNetError as e:
+                if attempt == 0:
+                    continue
+                if e.session_suspect:
+                    raise SessionExpired(
+                        "Your maimai DX NET session has expired. Please /cc-login again."
+                    ) from e
+                raise
+            return "applied"
+
+        raise UnexpectedResponse(f"could not equip the requested {conf['label'].lower()}")
 
     async def get_circle(self) -> Circle | None:
         html = await self._get_page(urls.INTL["CIRCLE_PAGE"])

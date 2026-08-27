@@ -53,3 +53,8 @@ class TransientNetError(MaimaiNetError):
         super().__init__(message)
         self.code = code
         self.session_suspect = session_suspect
+
+
+class ItemNotOwned(MaimaiNetError):
+    """A saved preset names a collection item the account no longer has (or
+    never had) on the relevant listing page."""

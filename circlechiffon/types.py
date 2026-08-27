@@ -269,3 +269,18 @@ class Photo:
     chart_type: ChartType | None = None
     played_at: datetime | None = None
     venue: str | None = None
+
+
+@dataclass(slots=True, kw_only=True)
+class CollectionItem:
+    """One entry on a collection/{,nameplate,frame,trophy} page.
+
+    `key` is the only part stable enough to store: `idx` is a single-use
+    nonce (confirmed live - two fetches of the same page share none of their
+    idx values), so a saved preset holds `key` and re-resolves idx at load
+    time."""
+
+    key: str
+    label: str
+    image_url: str | None = None
+    idx: str | None = None
