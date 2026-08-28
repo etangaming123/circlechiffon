@@ -1,12 +1,28 @@
+import io
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 
 from circlechiffon import access, accounts, embed_colors
 from circlechiffon.adapters.maimai_net.errors import MaimaiNetError, SessionExpired
-from circlechiffon.types import Circle, CircleMember
+from circlechiffon.types import Circle, CircleChallenge, CircleMember
 
 _PAGE_SIZE = 10
+
+_GAUGE_BAR_WIDTH = 20
+
+
+def _gauge_bar(percent: float) -> str:
+    """`[########------------] 40%`, same shape as cogs/chart.py's
+    _progress_bar - duplicated rather than imported since it's four lines and
+    the two cogs have no other reason to depend on each other. Unlike a
+    render-progress fraction this gauge can legitimately exceed 100% (a
+    circle can overshoot its challenge target), so the bar clamps for
+    display but the printed percentage doesn't."""
+    fraction = min(1.0, max(0.0, percent / 100))
+    filled = int(fraction * _GAUGE_BAR_WIDTH)
+    return f"`[{'#' * filled}{'-' * (_GAUGE_BAR_WIDTH - filled)}]` {percent:.1f}%"
 
 
 def _profile_embed(circle: Circle) -> discord.Embed:
@@ -94,6 +110,36 @@ class CircleMembersView(discord.ui.View):
                 pass
 
 
+def _challenge_embed(challenge: CircleChallenge, has_image: bool) -> discord.Embed:
+    embed = discord.Embed(title=challenge.song_title, color=embed_colors.INFO)
+    if challenge.category:
+        embed.add_field(name="Category", value=challenge.category, inline=True)
+    if challenge.note_designer:
+        embed.add_field(name="Note Designer", value=challenge.note_designer, inline=True)
+    if challenge.gauge_percent is not None:
+        embed.add_field(name="Progress", value=_gauge_bar(challenge.gauge_percent), inline=False)
+    if challenge.achievement_percent is not None:
+        embed.add_field(name="Achievement", value=f"{challenge.achievement_percent:,.4f}%", inline=True)
+
+    member = challenge.member
+    if member is not None:
+        lines = []
+        if member.rating is not None:
+            lines.append(f"Rating {member.rating:,}")
+        if member.title:
+            tier = f" ({member.title_tier.title()})" if member.title_tier else ""
+            lines.append(f"{member.title}{tier}")
+        embed.add_field(
+            name=f"Track selected by {member.name}",
+            value="\n".join(lines) if lines else "​",
+            inline=False,
+        )
+
+    if has_image:
+        embed.set_thumbnail(url="attachment://jacket.jpg")
+    return embed
+
+
 class CircleCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -139,6 +185,51 @@ class CircleCog(commands.Cog):
         except Exception as e:
             await interaction.edit_original_response(
                 content=f"Couldn't fetch your Circle info: unexpected error ({type(e).__name__}: {e})"
+            )
+
+    @app_commands.command(name="cc-circle-challenge", description="View this week's maimai DX Circle challenge")
+    @app_commands.allowed_installs(guilds=True, users=True)
+    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+    async def circle_challenge(self, interaction: discord.Interaction):
+        if not await access.handle_command_access(
+            interaction, interaction.user.id, "cc-circle-challenge", access.MAIMAI_NET_COOLDOWN
+        ):
+            return
+        await interaction.response.defer()
+        await interaction.edit_original_response(content="Getting data...")
+
+        async def fetch(client):
+            challenge = await client.get_circle_challenge()
+            image_bytes = None
+            if challenge is not None and challenge.jacket_url:
+                image_bytes = await client.get_image_bytes(challenge.jacket_url)
+            return challenge, image_bytes
+
+        try:
+            challenge, image_bytes = await accounts.with_client(
+                interaction.user.id, fetch, on_retry=accounts.default_retry_notice(interaction)
+            )
+
+            if challenge is None:
+                await interaction.edit_original_response(
+                    content="No active Circle challenge right now, or you don't appear to be in a Circle."
+                )
+                return
+
+            embed = _challenge_embed(challenge, has_image=image_bytes is not None)
+            file = discord.File(io.BytesIO(image_bytes), filename="jacket.jpg") if image_bytes else None
+            await interaction.edit_original_response(content=None, embed=embed, attachments=[file] if file else [])
+        except accounts.NotLinked:
+            await interaction.edit_original_response(
+                content="You haven't linked a maimai DX NET account yet. Run `/cc-login` first."
+            )
+        except SessionExpired as e:
+            await interaction.edit_original_response(content=str(e))
+        except MaimaiNetError as e:
+            await interaction.edit_original_response(content=f"Couldn't fetch the Circle challenge: {e}")
+        except Exception as e:
+            await interaction.edit_original_response(
+                content=f"Couldn't fetch the Circle challenge: unexpected error ({type(e).__name__}: {e})"
             )
 
 

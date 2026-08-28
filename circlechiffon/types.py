@@ -240,6 +240,27 @@ class CircleMember:
 
 
 @dataclass(slots=True, kw_only=True)
+class CircleChallengeMember:
+    name: str
+    rating: int | None = None
+    title: str | None = None
+    title_tier: str | None = None
+    title_plate_url: str | None = None
+    icon_url: str | None = None
+
+
+@dataclass(slots=True, kw_only=True)
+class CircleChallenge:
+    song_title: str
+    category: str | None = None
+    note_designer: str | None = None
+    jacket_url: str | None = None
+    gauge_percent: float | None = None
+    achievement_percent: float | None = None
+    member: CircleChallengeMember | None = None
+
+
+@dataclass(slots=True, kw_only=True)
 class Circle:
     name: str
     code: str

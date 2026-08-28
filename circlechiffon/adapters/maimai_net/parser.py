@@ -7,6 +7,8 @@ from circlechiffon.adapters.maimai_net import urls
 from circlechiffon.types import (
     ChartType,
     Circle,
+    CircleChallenge,
+    CircleChallengeMember,
     CircleMember,
     ComboFlag,
     Difficulty,
@@ -807,6 +809,7 @@ def parse_recent_score_detail(html: str) -> Judgements | None:
 
 _POINTS_RE = re.compile(r"([\d,]+)\s*PT")
 _RANK_RE = re.compile(r"Rank\s*([\d,]+)")
+_GAUGE_WIDTH_RE = re.compile(r"width:\s*([\d.]+)%")
 
 
 def parse_circle(html: str) -> Circle | None:
@@ -899,6 +902,90 @@ def parse_circle_members(html: str) -> list[CircleMember]:
                 points = _parse_int(m.group(1))
         members.append(CircleMember(name=name, points=points))
     return members
+
+
+def parse_circle_challenge(html: str) -> CircleChallenge | None:
+    """Parses the circle challenge block on the circle profile page
+    (circle/) - confirmed live against real pasted markup. .circle_challenge_block
+    (song + gauge + achievement) and its sibling .circle_challenge_chosemember_block
+    (who the challenge's current pick is) are both direct children of the same
+    .basic_block, not nested in each other, so each is queried from the full
+    tree rather than scoped into the other. The trophy-tier extraction mirrors
+    _extract_profile_fields's .trophy_block/.trophy_inner_block handling."""
+    tree = LexborHTMLParser(html)
+
+    block = tree.css_first(".circle_challenge_block")
+    if block is None:
+        return None
+
+    title_node = block.css_first(".f_15.break")
+    if title_node is None:
+        return None
+    song_title = title_node.text(strip=True)
+
+    category_node = block.css_first(".blue")
+    category = category_node.text(strip=True) if category_node is not None else None
+
+    note_designer_node = block.css_first(".f_12.break")
+    note_designer = note_designer_node.text(strip=True) if note_designer_node is not None else None
+
+    jacket_node = block.css_first("img")
+    jacket_url = jacket_node.attributes.get("src") if jacket_node is not None else None
+
+    gauge_percent = None
+    gauge_node = block.css_first(".circle_challenge_gauge_status")
+    if gauge_node is not None:
+        m = _GAUGE_WIDTH_RE.search(gauge_node.attributes.get("style") or "")
+        if m:
+            gauge_percent = float(m.group(1))
+
+    achievement_percent = None
+    achiv_node = block.css_first(".circle_challenge_achiv_text")
+    if achiv_node is not None:
+        achievement_percent = _parse_achievement(achiv_node.text())
+
+    member = None
+    member_node = tree.css_first(".circle_challenge_chosemember_block")
+    if member_node is not None:
+        name_node = member_node.css_first(".name_block")
+        if name_node is not None:
+            rating = None
+            rating_node = member_node.css_first(".rating_block")
+            if rating_node is not None:
+                rating = _parse_int(rating_node.text())
+
+            icon_node = member_node.css_first("img")
+            icon_url = icon_node.attributes.get("src") if icon_node is not None else None
+
+            title = None
+            title_tier = None
+            trophy_node = member_node.css_first(".trophy_block")
+            if trophy_node is not None:
+                inner_node = trophy_node.css_first(".trophy_inner_block")
+                title = inner_node.text(strip=True) if inner_node is not None else None
+                for cls in (trophy_node.attributes.get("class") or "").split():
+                    if cls.startswith("trophy_") and cls != "trophy_block" and cls != "trophy_inner_block":
+                        title_tier = cls.removeprefix("trophy_")
+                        break
+
+            member = CircleChallengeMember(
+                name=name_node.text(strip=True),
+                rating=rating,
+                title=title,
+                title_tier=title_tier,
+                title_plate_url=urls.trophy_plate_url(title_tier),
+                icon_url=icon_url,
+            )
+
+    return CircleChallenge(
+        song_title=song_title,
+        category=category,
+        note_designer=note_designer,
+        jacket_url=jacket_url,
+        gauge_percent=gauge_percent,
+        achievement_percent=achievement_percent,
+        member=member,
+    )
 
 
 def parse_equipped_collection_image(html: str, selector: str) -> str | None:
