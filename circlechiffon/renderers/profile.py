@@ -444,6 +444,11 @@ def render_profile_extras(
         fill_w = round((EXTRAS_CANVAS_WIDTH - pad * 2) * frac)
         if fill_w > 0:
             draw.rounded_rectangle([(pad, bar_y), (pad + fill_w, bar_y + bar_h)], radius=bar_h // 2, fill=(64, 200, 255))
+    segments = 10
+    seg_w = (EXTRAS_CANVAS_WIDTH - pad * 2) / segments
+    for i in range(1, segments):
+        sep_x = round(pad + seg_w * i)
+        draw.line([(sep_x, bar_y + 2), (sep_x, bar_y + bar_h - 2)], fill=BACKGROUND_COLOR, width=2)
     y += _CP_SECTION_H
 
     # mile + mission section
@@ -457,14 +462,15 @@ def render_profile_extras(
         draw.text((pad, y + 28), clear_text, font=FONT_BODY_SMALL, fill=(140, 220, 140))
     y += _MILE_HEADER_H
 
+    _COMPLETE_YELLOW = (255, 221, 51)  # matches mile_text/reward accent yellow
     for mission in extras.missions:
         row_color = (40, 60, 44) if mission.cleared else (38, 38, 48)
         draw.rectangle([(pad, y + 2), (EXTRAS_CANVAS_WIDTH - pad, y + _MISSION_ROW_H - 6)], fill=row_color, outline=(55, 55, 68))
         check = "✓" if mission.cleared else "○"
-        draw.text((pad + 12, y + 12), check, font=FONT_BODY, fill=(140, 220, 140) if mission.cleared else (120, 120, 130))
-        text = mission.text or "Complete previous mission to unlock!"
+        draw.text((pad + 12, y + 12), check, font=FONT_BODY, fill=_COMPLETE_YELLOW if mission.cleared else (120, 120, 130))
+        text = "Complete!" if mission.cleared else (mission.text or "Complete previous mission to unlock!")
         text = _truncate_to_width(draw, text, FONT_BODY_SMALL, EXTRAS_CANVAS_WIDTH - pad * 2 - 150)
-        draw.text((pad + 40, y + 13), text, font=FONT_BODY_SMALL, fill=(220, 220, 225) if mission.cleared else (150, 150, 158))
+        draw.text((pad + 40, y + 13), text, font=FONT_BODY_SMALL, fill=_COMPLETE_YELLOW if mission.cleared else (150, 150, 158))
         if mission.mile_reward is not None:
             reward_text = f"+{mission.mile_reward} maimille"
             reward_w = draw.textlength(reward_text, font=FONT_BODY_SMALL)
