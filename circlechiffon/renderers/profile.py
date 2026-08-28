@@ -438,17 +438,33 @@ def render_profile_extras(
     draw.text((EXTRAS_CANVAS_WIDTH - pad - cp_text_w, y + 10), cp_text, font=FONT_BODY, fill=(220, 220, 225))
     bar_y = y + 44
     bar_h = 22
+    bar_w = EXTRAS_CANVAS_WIDTH - pad * 2
     draw.rounded_rectangle([(pad, bar_y), (EXTRAS_CANVAS_WIDTH - pad, bar_y + bar_h)], radius=bar_h // 2, fill=(50, 50, 62))
-    if cp_current is not None and cp_required:
-        frac = max(0.0, min(1.0, cp_current / cp_required))
-        fill_w = round((EXTRAS_CANVAS_WIDTH - pad * 2) * frac)
-        if fill_w > 0:
-            draw.rounded_rectangle([(pad, bar_y), (pad + fill_w, bar_y + bar_h)], radius=bar_h // 2, fill=(64, 200, 255))
+    _CP_OVERFLOW_COLOR = (255, 140, 60)
+    overflow_tens = 0
+    if cp_current is not None:
+        if not cp_required:
+            # some classes have no maximum - render the gauge as completely full.
+            draw.rounded_rectangle([(pad, bar_y), (EXTRAS_CANVAS_WIDTH - pad, bar_y + bar_h)], radius=bar_h // 2, fill=(64, 200, 255))
+        else:
+            # gauge only has 10 segments, so cp_current wraps like an odometer:
+            # the last digit fills the bar, the rest becomes a "+N" overflow badge.
+            ones = cp_current % 10
+            overflow_tens = cp_current // 10
+            if overflow_tens > 0:
+                draw.rounded_rectangle([(pad, bar_y), (EXTRAS_CANVAS_WIDTH - pad, bar_y + bar_h)], radius=bar_h // 2, fill=_CP_OVERFLOW_COLOR)
+            fill_w = round(bar_w * ones / 10)
+            if fill_w > 0:
+                draw.rounded_rectangle([(pad, bar_y), (pad + fill_w, bar_y + bar_h)], radius=bar_h // 2, fill=(64, 200, 255))
     segments = 10
-    seg_w = (EXTRAS_CANVAS_WIDTH - pad * 2) / segments
+    seg_w = bar_w / segments
     for i in range(1, segments):
         sep_x = round(pad + seg_w * i)
         draw.line([(sep_x, bar_y + 2), (sep_x, bar_y + bar_h - 2)], fill=BACKGROUND_COLOR, width=2)
+    if overflow_tens > 0:
+        overflow_text = f"+{overflow_tens}"
+        overflow_w = draw.textlength(overflow_text, font=FONT_BODY)
+        draw.text((EXTRAS_CANVAS_WIDTH - pad - cp_text_w - overflow_w - 12, y + 10), overflow_text, font=FONT_BODY, fill=_CP_OVERFLOW_COLOR)
     y += _CP_SECTION_H
 
     # mile + mission section
