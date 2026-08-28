@@ -1,6 +1,6 @@
 # CiRCLE Chiffon
 
-Yet Another Discord bot for [maimai DX NET](https://maimaidx-eng.com/) (SEGA's official web service for maimaiDX). Link your SEGA ID account and view your profile, recent plays, and best-rated scores through Discord slash commands, or look up song data and calculate rating points without linking anything.
+Yet Another Discord bot for [maimai DX NET](https://maimaidx-eng.com/) (SEGA's official web service for maimai DX). Link your SEGA ID account and view your profile, recent plays, best-50 rating and more through Discord slash commands, or look up song data and calculate rating points without linking anything.
 
 Shoutout to [chuni-penguin](https://github.com/beer-psi/chuni-penguin).
 
@@ -9,33 +9,66 @@ Shoutout to [chuni-penguin](https://github.com/beer-psi/chuni-penguin).
 [Add to your Discord](https://discord.com/oauth2/authorize?client_id=1540564874231414944 "Add CiRCLE Chiffon to your Discord account") • [GitHub Issues](https://github.com/etangaming123/circlechiffon/issues "Report a bug or request a feature")
 
 > [!NOTE]
-> Uptime of this bot is flaky. You are free to selfhost the bot and run it on your own bot account (or, preferably, use a better maimai DX NET bot instead, like mimi xd or mai bot 2.0).
+> Uptime of this bot is flaky.
+> You are free to selfhost the bot and run it on your own bot account (or, preferably, use a better maimai DX NET bot instead, like mimi xd or mai bot 2.0).
 
 > [!WARNING]
-> This bot is intended for self hosting. etangaming123 is not responsible for sensitive data on this bot being leaked. Account linking is 100% optional (`/cc-info` and `/cc-rating` need nothing linked), and you may unlink and delete everything at any time with `/cc-logout`.
+> This bot is intended for self hosting. etangaming123 is not responsible for sensitive data on this bot being leaked.
+> Account linking is 100% optional, and you may unlink and delete everything at any time with `/cc-logout`.
 
 > [!NOTE]
 > This is not meant to be a complete replacement to the other (cool) bots out there (such as mimi xd and mai bot 2.0). It's a personal "vibecoded" project :^)
 
-## Commands
+Only the **INTL** region (`maimaidx-eng.com`) is supported.
 
-* `/cc-login` — Link your maimai DX NET account (SEGA ID username/password via a private modal). Optional `remember_password` flag - see below. Requires linked account: no
-* `/cc-logout` — Unlink your account. Requires linked account: no
-* `/cc-profile` — Renders your Player's Data image. Default `view:Core` shows name/title/rating/rank badges/star count/play counts/the full music clear-count grid; `view:Extra` shows class point progress, mile count, missions, tickets, and intimate item count instead. Requires linked account: yes
-* `/cc-recent` — Page through your recent plays one *credit* at a time (Prev/Next buttons) - one embed per track played that credit (jacket, achievement%, rating, combo flag, specific sync tier). A dropdown lets you drill into one track's judgment counts + DX score - see below. Requires linked account: yes
-* `/cc-best` — Renders your Best-50 rating image (B15 = current version + one version prior, B35 = everything older, styled after dxrating.net's own best-50 image). Requires linked account: yes
-* `/cc-info` — Look up a song's chart levels. Add the optional `difficulty` choice for that chart's full detail - version, release date, charter, note counts, and dxrating.net tags - plus jacket art either way. Requires linked account: no
-* `/cc-scores` — View your score on a song, difficulty by difficulty (`< / >` buttons), with the player's name on the embed. Pass the optional `friend` option (their display name, fuzzy-matched, or their exact id from `/cc-friends show_ids:True`) to see **their** score on that chart instead - if the name matches more than one friend you get a dropdown to pick from. A friend's embed shows achievement and combo/sync only: SEGA doesn't expose DX score, rating, or play counts for anyone but yourself. Requires linked account: yes
-* `/cc-rating` — Calculate the rating points a (constant, achievement%) combo earns. Requires linked account: no
-* `/cc-chart` — Looks up a chart on [mai-notes.com](https://mai-notes.com/) and, **for the bot owner only**, renders a **video of it playing**. Takes a song title (with autocomplete) plus an optional `difficulty` (default MASTER), `chart_type` (DX/Standard), `notespeed` (ハイスピ, 3.0-9.0, default 7.5), and `from_measure`/`to_measure` to render just a section. Tap sounds are mixed in. Everyone else — and the owner too, whenever mai-notes has no playable data for a chart (only ~45% of what it lists, mostly MASTER and Re:MASTER) — gets the chart's stats instead: level, constant, note breakdown, charter, top DX score, tags. Rendering is owner-gated because it's by far the heaviest thing the bot does (a headless browser plus a video encode), and only one render runs at a time. Needs `ffmpeg` and Playwright's Chromium on the host (see Selfhosting). Requires linked account: no
-* `/cc-friends` — List your maimai DX NET friends, sorted by rating. Optional `show_ids` flag reveals each friend's internal id (only needed to disambiguate two friends with the same name). Requires linked account: yes
-* `/cc-friend-profile` — View a friend's profile by name or id - much more limited than `/cc-profile`, since SEGA doesn't expose play counts or clear-count grids for anyone but yourself. Requires linked account: yes
-* `/cc-friend-best` — Renders a friend's best-50 rating image from their scraped achievements. The rating shown is **computed locally**, not SEGA's own number - SEGA never shows a friend's real rating. Requires linked account: yes
-* `/cc-leaderboard` — Ranks you and all of your friends on a single chart by achievement, showing each player's rank badge and FC/AP status. Takes a song title (with autocomplete) and an optional `difficulty` (default MASTER); `< / >` buttons switch difficulty. Players with no score on the chart are hidden. Because it's an intensive command it asks you to confirm before fetching anything, and has a longer 120s cooldown. Requires linked account: yes
+## Features
 
-Currently only the **INTL** region (`maimaidx-eng.com`) is supported.
+Commands marked 🔗 need a linked SEGA ID account. Everything else works with nothing linked.
 
-Chart videos and chart data for `/cc-chart` come from [mai-notes.com](https://mai-notes.com/) (maiノーツ), a community maimai chart database — the video is its own player, driven headlessly and recorded.
+### Account
+
+* 🔗 `/cc-login` — Link your maimai DX NET account, via a private modal. Optional `remember_password` flag
+* `/cc-logout` — Unlink and delete everything stored about you
+
+### Profile & Records
+
+* 🔗 `/cc-profile` — Your Player's Data image: name, title, rating, rank badges, play counts and the full clear-count grid (`view:Extra` shows class points, miles, missions and tickets instead)
+* 🔗 `/cc-display` — Your nameplate, rendered close to how the real cab displays it
+* 🔗 `/cc-recent` — Page through your recent plays one *credit* at a time, with a dropdown to drill into a single track's judgment counts and DX score
+* 🔗 `/cc-best` — Your Best-50 rating image (B15 + B35), styled after dxrating.net's
+* 🔗 `/cc-album` — Browse your maimai DX NET photo album
+
+### Scores & Rating
+
+* 🔗 `/cc-scores` — Your score on a song, difficulty by difficulty. Pass `friend:` to see theirs instead
+* `/cc-info` — Look up a song's chart levels, and with a `difficulty`, its full detail: constant, charter, note counts, release version and tags
+* `/cc-rating` — Calculate the rating points a (constant, achievement%) combo earns
+
+### Social
+
+* 🔗 `/cc-friends` — List your maimai DX NET friends, sorted by rating
+* 🔗 `/cc-friend-profile` — View a friend's profile
+* 🔗 `/cc-friend-best` — Render a friend's best-50 image, computed from their scraped scores
+* 🔗 `/cc-leaderboard` — Rank you and all your friends on a single chart by achievement
+* 🔗 `/cc-circle` — Your CiRCLE (team) info, points, ranking and members
+* 🔗 `/cc-circle-challenge` — This week's CiRCLE challenge and its progress gauge
+
+### Cosmetic
+
+* 🔗 `/cc-preset-save` / `/cc-preset-load` / `/cc-preset-list` / `/cc-preset-delete` — Save your equipped icon, name plate, frame and title to a slot, and re-equip the whole set in one command
+
+### Charts
+
+* `/cc-chart` — Look up a chart on [mai-notes.com](https://mai-notes.com/): level, constant, note breakdown, charter, top DX score and tags. **For the bot owner only**, renders the chart as a *video of it playing*, with tap sounds mixed in
+
+### Owner
+
+* `/cc-ping` — Ping the bot
+* `/cc-ban` / `/cc-unban` — Bot-level ban controls
+
+## Screenshots/Showcase
+
+![/cc-display](./images/preview_display.png)
 
 ## Quickstart
 
@@ -54,14 +87,16 @@ Do note that if you lack the "External Apps" permission in servers, you will sti
 The following are optional, but recommended:
 
 * A device capable of running the Python program for a while (if you plan on leaving the bot online most of the time)
+* `ffmpeg` and Playwright's Chromium, if you want `/cc-chart` to render videos
 
 ### Discord Bot
 
 1. Log on to the [Discord Developer Portal](https://discord.com/developers/applications "Leads you to the Discord Developer Portal").
 2. Create a new application using the button on the top right.
-3. Under the Bot tab, reset the bot's token and copy it - you'll need it in a moment.
-4. Go to the Installation tab and enable both "Guild Install" and "User Install", with the `applications.commands` and `bot` scopes. No privileged Gateway intents are required.
-5. Copy the generated install link and paste it into your browser to add the bot to your own account (and, optionally, servers).
+3. Add a new app icon. This will be the bot's profile picture.
+4. Under the Bot tab, reset the bot's token and copy it - you'll need it in a moment.
+5. Go to the Installation tab and enable both "Guild Install" and "User Install", with the `applications.commands` and `bot` scopes. No privileged Gateway intents are required.
+6. Copy the generated install link and paste it into your browser to add the bot to your own account (and, optionally, servers).
 
 ### Python Code
 
@@ -82,7 +117,7 @@ Run the bot once with `python main.py` - it will create a `config.json` for you 
 
 #### Encryption key (recommended)
 
-Session cookies, and SEGA ID username/passwords for users who opt into `remember_password`, are encrypted at rest. By default the encryption key is auto-generated into a local file (`.circlechiffon.key`) on first run - this works out of the box, but the key ends up sitting on disk right next to what it unlocks.
+Session tokens, and SEGA ID credentials for users who opt into `remember_password`, are encrypted at rest. By default the encryption key is auto-generated into a local file (`.circlechiffon.key`) on first run - this works out of the box, but the key ends up sitting on disk right next to what it unlocks.
 
 For better security, set the `CIRCLECHIFFON_ENCRYPTION_KEY` environment variable to a Fernet key of your own before starting the bot instead. Don't lose it - if you do, every user will need to `/cc-login` again.
 
@@ -93,42 +128,16 @@ Refresh your Discord client, and press `/` on your keyboard. You should see the 
 
 Do note that the program has to be continuously running for the bot to work. If you close the terminal or stop the program, the bot will go offline and become unusable until you run it again.
 
-## How credential handling works
+## Documentation
 
-`/cc-login` opens a Discord modal (never a plain slash-command argument, so your credentials never appear in a channel or interaction log) asking for your SEGA ID username and password. By default the bot uses them **once**, in memory, to log into SEGA's Aime auth gateway and obtain a maimai DX NET session cookie, then discards the password entirely. Only the resulting session cookie is stored, encrypted at rest (Fernet, via `cryptography`) in the local SQLite database. If your session expires, commands will tell you to `/cc-login` again - your password is never cached anywhere to auto-refresh it by default.
+* [How credential handling works](./docs/credentials.md) — what's stored, what isn't, and how `remember_password` changes that
+* [Known limitations and testing notes](./docs/limitations.md) — what's verified live, what's best-effort, and why friend data is limited
+* [Data credits](./docs/credits.md) — dxrating, chuni-penguin, mai-notes and the bundled fonts
 
-### Optional: `/cc-login remember_password:True`
+The bot will automatically create new image templates in `./templates`, so you can edit them to your liking.
 
-Session cookies can expire, and re-running `/cc-login` every time is annoying. `/cc-login` has an opt-in `remember_password` option: turning it on shows an explicit warning and requires you to confirm via a button before anything is stored. If you confirm, your SEGA ID username **and password** are stored, encrypted at rest the same way the session cookie is, and the bot will silently re-login with them whenever your session cookie expires - `/cc-profile`, `/cc-recent`, and `/cc-best` transparently retry once after a fresh login instead of just telling you to `/cc-login` again.
+## License
 
-This is **less secure** than the default (cookie-only) option: a stored password is more valuable if this bot's database or encryption key is ever compromised than a session cookie, which can simply be invalidated. Only opt in if you're comfortable with that tradeoff. `/cc-logout` deletes everything that's stored - the session cookie and, if you opted in, your credentials - at once.
+CiRCLE Chiffon is licenced under the **[MIT License](./LICENSE "Leads you to the license for this repository").**
 
-## `/cc-best`'s editable template
-
-`assets/b50/template.png` is the background layer every `/cc-best` render draws on top of. Replace it with anything you like (any size - it's resized to 1500x1300) to reskin every future render - add a logo, a pattern, your own branding - with no code changes. If the file is ever missing, rendering falls back to a plain solid background rather than failing.
-
-## Data credits
-
-The vendored song/chart catalog (`data/dxdata.json`, trimmed from the full dataset), the rating formula (`circlechiffon/ratingcalc/calculator.py`), the B15/B35 best-50 bucketing logic (`circlechiffon/ratingcalc/best50.py`), and the chart tag/jacket APIs (`circlechiffon/adapters/dxrating/`) are all ported/sourced from [gekichumai/dxrating](https://github.com/gekichumai/dxrating) (MIT License) - dxdata itself, `packages/maimai-domain`'s rating math, dxrating's public `/api/v1/tags` endpoint, and its `shama.dxrating.net` jacket CDN, respectively. The `/cc-best` image (`circlechiffon/renderers/b50.py`) is a from-scratch Pillow reimplementation of the visual design of dxrating's own best-50 "oneshot" image (which itself runs a server-side Satori/resvg/sharp pipeline, not portable to Python) - same layout and difficulty colors, different renderer.
-
-The maimai DX NET login-flow structure and page markup were also cross-referenced against dxrating's backend scraper, and the SEGA-ID-modal-based login pattern, plus the Pillow rendering technique itself (thread-offloaded rendering, bundled fonts, BytesIO/discord.File delivery), mirror [beer-psi/chuni-penguin](https://github.com/beer-psi/chuni-penguin) (0BSD License), which implements the equivalent flow/renderer for CHUNITHM-NET. The bundled fonts in `assets/fonts/` (Inter, Noto Sans JP) are copied from chuni-penguin's own bundle - both are OFL-licensed and freely redistributable.
-
-The bot's own original code is not currently released under a separate open-source license.
-
-## Known limitations / testing notes
-
-The rating calculator and song catalog/search are unit-testable with no live account (see `circlechiffon/ratingcalc/calculator.py` and `circlechiffon/songdata/catalog.py`). `/cc-login`, `/cc-profile`, `/cc-recent`, and `/cc-best` need a real SEGA ID login against SEGA's live service to fully verify - the HTML scraping selectors for recent/music-score pages are ported directly from a known working reference implementation (dxrating), but `/cc-profile`'s selectors (`.name_block`, `.rating_block`, `.trophy_block`) are best-effort, since neither reference project scrapes the home/profile page, and should be checked against a live account and adjusted if maimai DX NET's markup differs.
-
-Selecting a track from `/cc-recent`'s dropdown to view judgment counts, DX score, and max combo is likewise genuinely **unverified**: no reference project covers maimai DX NET's per-play detail page, so the URL and judgment-count parsing are both best-effort. If a track's dropdown selection returns "couldn't load play detail," that means the guess needs adjusting - not that the rest of the bot is broken.
-
-An existing `circlechiffon.db` from before the `remember_password` feature is handled automatically: `main.py` runs a small in-place `ALTER TABLE` migration on startup to add the new column, so no manual database changes or resets are needed when upgrading.
-
-`/cc-info`'s autocomplete logs each query's timing to stdout (`cc-info autocomplete for '...' took N.Nms`) - if autocomplete still seems slow in practice, those numbers will show whether the time is going into the bot's own search code or somewhere else (Discord round-trip, host load, etc.).
-
-The dxrating.net tags API and jacket CDN could not be exercised against the real network from the environment this was built in (its egress proxy blocks both `miruku.dxrating.net` and `shama.dxrating.net`). Everything downstream of a failed dxrating call was built and tested to degrade gracefully instead of breaking the command (no tags shown, a solid placeholder square instead of jacket art), so if you see that fallback behavior in practice it's worth checking connectivity to those two hosts before assuming a bug.
-
-`/cc-friends`, `/cc-friend-profile`, `/cc-friend-best`, `/cc-leaderboard`, and `/cc-scores`' `friend` option's selectors (the friend list, friend detail, and friend VS/achievement pages) were confirmed live against a real logged-in account during development, unlike most of this bot's other best-effort scrapers - see the parser functions' own docstrings in `circlechiffon/adapters/maimai_net/parser.py` for exactly what was checked. A few things are architectural, not bugs: no raw DX score is obtainable for a friend, only achievement/combo/sync (enough to compute a rating, not enough for a DX-score-accurate best-50, and why `/cc-scores friend:` shows a shorter embed than it does for your own scores); play counts and last-played timestamps are likewise yours alone, since a friend's score rows carry no id to reach a song's detail page with; and the rating shown on `/cc-friend-best` is always computed locally from those scraped achievements, since SEGA never shows a friend's real rating number anywhere.
-
-An earlier version of this section claimed friend score data was only available for friends marked as a Favorite. **That was wrong** and has been re-verified live: a non-favorited friend's MASTER page returned 177 played charts against a favorited friend's 52, off the same account. Favorite status has no bearing on score access — an empty result means the friend genuinely hasn't played that difficulty.
-
-`/cc-leaderboard` is by far the heaviest command here: it costs one request per friend (plus two for your own profile and score list), so on an account with ~50 friends it issues ~50 requests, deliberately capped at 5 in flight at a time so it doesn't monopolize the process-wide rate limiter while it runs. Switching difficulty from the buttons re-runs that whole fan-out for the new difficulty and caches the result, rather than pre-fetching all five up front. Because of that cost it's the only command that asks for confirmation first - the prompt appears before any request is made, so it can't name your exact friend count without already spending the requests it's asking about, and declining (or letting it time out) releases the cooldown rather than charging you for a command that never ran.
+All other assets, such as song data, jacket art and the bundled fonts, are not owned by etangaming123 and carry their own terms - see [Data credits](./docs/credits.md). maimai DX is property of SEGA; this project is unofficial and not affiliated with or endorsed by SEGA.
