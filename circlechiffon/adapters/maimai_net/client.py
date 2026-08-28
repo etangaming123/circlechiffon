@@ -23,6 +23,7 @@ from circlechiffon.adapters.maimai_net.parser import (
     is_maintenance,
     is_transient_error,
     parse_circle,
+    parse_circle_challenge,
     parse_circle_members,
     parse_collection_items,
     parse_csrf_token,
@@ -43,6 +44,7 @@ from circlechiffon.adapters.maimai_net.parser import (
 )
 from circlechiffon.types import (
     Circle,
+    CircleChallenge,
     CircleMember,
     CollectionItem,
     Difficulty,
@@ -642,6 +644,13 @@ class MaimaiNetClient:
     async def get_circle(self) -> Circle | None:
         html = await self._get_page(urls.INTL["CIRCLE_PAGE"])
         return parse_circle(html)
+
+    async def get_circle_challenge(self) -> CircleChallenge | None:
+        """This command's whole point is the challenge, so - unlike
+        get_circle_members() - a fetch failure propagates rather than
+        degrading to a silent empty result."""
+        html = await self._get_page(urls.INTL["CIRCLE_PAGE"])
+        return parse_circle_challenge(html)
 
     async def get_photos(self) -> list[Photo]:
         """The in-game "Album" - unguarded, unlike get_circle_members():
