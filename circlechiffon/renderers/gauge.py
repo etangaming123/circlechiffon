@@ -85,17 +85,14 @@ def render_achievement_gauge(achievement_percent: float, output) -> None:
         width=_PILL_BORDER_WIDTH,
     )
 
-    label_font = ImageFont.truetype(_INTER_BOLD, 12)
+    pill_mid_y = (_PILL_Y0 + _PILL_Y1) / 2
+    label_font = ImageFont.truetype(_INTER_BOLD, 13)
     label_x = _PILL_X0 + 22
-    draw.text((label_x, _PILL_Y0 + 8), "Achievement", font=label_font, fill=_LABEL_COLOR, anchor="lm")
-    draw.text((label_x, _PILL_Y0 + 22), "Progress", font=label_font, fill=_LABEL_COLOR, anchor="lm")
+    draw.text((label_x, pill_mid_y), "Achievement Progress", font=label_font, fill=_LABEL_COLOR, anchor="lm")
 
     value_text = f"{achievement_percent:,.4f}%"
     value_font = ImageFont.truetype(_INTER_BOLD, 22)
-    value_area_x0 = label_x + 90
-    value_center_x = value_area_x0 + (_PILL_X1 - _PILL_BORDER_WIDTH - value_area_x0) / 2
-    draw.text(
-        (value_center_x, (_PILL_Y0 + _PILL_Y1) / 2), value_text, font=value_font, fill=_VALUE_COLOR, anchor="mm"
-    )
+    value_x = _PILL_X1 - _PILL_BORDER_WIDTH - 18
+    draw.text((value_x, pill_mid_y), value_text, font=value_font, fill=_VALUE_COLOR, anchor="rm")
 
     image.save(output, "PNG", compress_level=3)
