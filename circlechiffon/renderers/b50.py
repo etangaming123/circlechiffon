@@ -16,37 +16,49 @@ _JP_BOLD = str(FONT_DIR / "NotoSansJP-Bold.ttf")
 _INTER_REGULAR = str(FONT_DIR / "Inter_28pt-Regular.ttf")
 _INTER_BOLD = str(FONT_DIR / "Inter_28pt-Bold.ttf")
 
-FONT_TITLE = ImageFont.truetype(_JP_BOLD, 15)
-FONT_SUBTEXT = ImageFont.truetype(_JP_REGULAR, 13)
-FONT_RATING = ImageFont.truetype(_JP_MEDIUM, 14)
-FONT_RATING_VALUE = ImageFont.truetype(_INTER_BOLD, 20)
-FONT_RANK_BADGE = ImageFont.truetype(_INTER_REGULAR, 12)
-FONT_HEADER_NAME = ImageFont.truetype(_JP_BOLD, 34)
-FONT_HEADER_STAT_VALUE = ImageFont.truetype(_INTER_BOLD, 30)
-FONT_HEADER_STAT_LABEL = ImageFont.truetype(_INTER_REGULAR, 14)
-FONT_SECTION_LABEL = ImageFont.truetype(_INTER_BOLD, 16)
-FONT_FOOTER = ImageFont.truetype(_INTER_REGULAR, 13)
+# Every pixel constant and drawing-offset literal in this module is defined
+# at this 1x logical size, then run through S() wherever it's used. Bumping
+# SCALE renders the same layout onto a proportionally larger canvas with
+# proportionally larger fonts/icons - a supersample for a crisper image
+# rather than a naive post-hoc upscale of a small render.
+SCALE = 2
+
+
+def S(value: int | float) -> int:
+    return round(value * SCALE)
+
+
+FONT_TITLE = ImageFont.truetype(_JP_BOLD, S(15))
+FONT_SUBTEXT = ImageFont.truetype(_JP_REGULAR, S(13))
+FONT_RATING = ImageFont.truetype(_JP_MEDIUM, S(14))
+FONT_RATING_VALUE = ImageFont.truetype(_INTER_BOLD, S(20))
+FONT_RANK_BADGE = ImageFont.truetype(_INTER_REGULAR, S(12))
+FONT_HEADER_NAME = ImageFont.truetype(_JP_BOLD, S(34))
+FONT_HEADER_STAT_VALUE = ImageFont.truetype(_INTER_BOLD, S(30))
+FONT_HEADER_STAT_LABEL = ImageFont.truetype(_INTER_REGULAR, S(14))
+FONT_SECTION_LABEL = ImageFont.truetype(_INTER_BOLD, S(16))
+FONT_FOOTER = ImageFont.truetype(_INTER_REGULAR, S(13))
 
 # Landscape layout: the two sections sit side by side rather than stacked,
 # and 35 / 15 both factor into 5 rows (7 wide and 3 wide respectively), so
 # the grids line up top and bottom with no partial row in either.
-COL_WIDTH = 300
-ROW_HEIGHT = 124
-CELL_PADDING = 4
+COL_WIDTH = S(300)
+ROW_HEIGHT = S(124)
+CELL_PADDING = S(4)
 CARD_WIDTH = COL_WIDTH - CELL_PADDING * 2
 CARD_HEIGHT = ROW_HEIGHT - CELL_PADDING * 2
-JACKET_SIZE = 84
+JACKET_SIZE = S(84)
 
 B35_COLS, B35_ROWS = 7, 5  # 35 cells
 B15_COLS, B15_ROWS = 3, 5  # 15 cells
 GRID_ROWS = B35_ROWS  # both sections are the same height
 
-SIDE_MARGIN = 18
-SECTION_GAP = 36  # between the two grid blocks; holds the vertical divider
-HEADER_HEIGHT = 150
-SECTION_HEADER_H = 32  # label + accent bar above each B35/B15 grid
-FOOTER_HEIGHT = 27
-LOGO_HEIGHT = 78  # current-version title logo, header top-right
+SIDE_MARGIN = S(18)
+SECTION_GAP = S(36)  # between the two grid blocks; holds the vertical divider
+HEADER_HEIGHT = S(150)
+SECTION_HEADER_H = S(32)  # label + accent bar above each B35/B15 grid
+FOOTER_HEIGHT = S(27)
+LOGO_HEIGHT = S(78)  # current-version title logo, header top-right
 
 # exact sums of every band - keeps the footer flush against the bottom of
 # the grids and the outer margins even, with no leftover slop.
@@ -80,7 +92,7 @@ _TIER_COLORS = {
 }
 
 
-_GUIDE_LABEL_FONT = ImageFont.truetype(str(FONT_DIR / "Inter_28pt-Regular.ttf"), 11)
+_GUIDE_LABEL_FONT = ImageFont.truetype(str(FONT_DIR / "Inter_28pt-Regular.ttf"), S(11))
 
 
 def _draw_guide_box(
@@ -92,11 +104,11 @@ def _draw_guide_box(
     (transparent background, no real Pillow-drawn content) for designing a
     matching background/decoration in an external image editor."""
     x0, y0, x1, y1 = box
-    draw.rectangle([(x0, y0), (x1, y1)], outline=color, width=2)
+    draw.rectangle([(x0, y0), (x1, y1)], outline=color, width=S(2))
     if label:
         label_w = draw.textlength(label, font=_GUIDE_LABEL_FONT)
-        draw.rectangle([(x0, y0), (x0 + label_w + 6, y0 + 14)], fill=(0, 0, 0, 200))
-        draw.text((x0 + 3, y0 + 1), label, font=_GUIDE_LABEL_FONT, fill=color)
+        draw.rectangle([(x0, y0), (x0 + label_w + S(6), y0 + S(14))], fill=(0, 0, 0, 200))
+        draw.text((x0 + S(3), y0 + S(1)), label, font=_GUIDE_LABEL_FONT, fill=color)
 
 
 def _load_base_image() -> Image.Image:
@@ -274,7 +286,7 @@ def _render_cell(
     card_pos = (x + CELL_PADDING, y + CELL_PADDING)
 
     if entry is None:
-        mask = _rounded_mask((CARD_WIDTH, CARD_HEIGHT), 10)
+        mask = _rounded_mask((CARD_WIDTH, CARD_HEIGHT), S(10))
         card = Image.new("RGB", (CARD_WIDTH, CARD_HEIGHT), (40, 40, 50))
         base.paste(card, card_pos, mask)
         return
@@ -286,41 +298,41 @@ def _render_cell(
         # entry) - grey the whole card out and drop title/jacket rather
         # than showing a difficulty-colored card with a fake-looking song.
         card = Image.new("RGB", (CARD_WIDTH, CARD_HEIGHT), (40, 40, 50)).convert("RGBA")
-        mask = _rounded_mask((CARD_WIDTH, CARD_HEIGHT), 10)
+        mask = _rounded_mask((CARD_WIDTH, CARD_HEIGHT), S(10))
         base.paste(card, card_pos, mask)
         draw = ImageDraw.Draw(base)
         fg = (150, 150, 155)
-        text_x = card_pos[0] + 8
-        draw.text((text_x, card_pos[1] + 8), "No Chart", font=FONT_RATING, fill=fg)
+        text_x = card_pos[0] + S(8)
+        draw.text((text_x, card_pos[1] + S(8)), "No Chart", font=FONT_RATING, fill=fg)
         return
 
     palette = _card_palette(entry.sheet.difficulty)
     card = _diagonal_gradient((CARD_WIDTH, CARD_HEIGHT), palette["bg1"], palette["bg2"]).convert("RGBA")
-    mask = _rounded_mask((CARD_WIDTH, CARD_HEIGHT), 10)
+    mask = _rounded_mask((CARD_WIDTH, CARD_HEIGHT), S(10))
     base.paste(card, card_pos, mask)
 
     draw = ImageDraw.Draw(base)
     fg = palette["fg"]
-    text_x = card_pos[0] + 8
-    text_max_width = CARD_WIDTH - JACKET_SIZE - 20
+    text_x = card_pos[0] + S(8)
+    text_max_width = CARD_WIDTH - JACKET_SIZE - S(20)
 
     # jacket, top-right, falls back to a solid dark placeholder square
-    jacket_pos = (card_pos[0] + CARD_WIDTH - JACKET_SIZE - 4, card_pos[1] + 4)
+    jacket_pos = (card_pos[0] + CARD_WIDTH - JACKET_SIZE - S(4), card_pos[1] + S(4))
     if jacket_bytes:
         try:
             with Image.open(io.BytesIO(jacket_bytes)) as jacket:
                 jacket = jacket.convert("RGB").resize((JACKET_SIZE, JACKET_SIZE), Image.Resampling.LANCZOS)
-                jmask = _rounded_mask((JACKET_SIZE, JACKET_SIZE), 6)
+                jmask = _rounded_mask((JACKET_SIZE, JACKET_SIZE), S(6))
                 base.paste(jacket, jacket_pos, jmask)
         except Exception:
             jacket_bytes = None
     if not jacket_bytes:
         placeholder = Image.new("RGB", (JACKET_SIZE, JACKET_SIZE), (15, 15, 20))
-        jmask = _rounded_mask((JACKET_SIZE, JACKET_SIZE), 6)
+        jmask = _rounded_mask((JACKET_SIZE, JACKET_SIZE), S(6))
         base.paste(placeholder, jacket_pos, jmask)
 
     title = _truncate_to_width(draw, entry.score.title, FONT_TITLE, text_max_width)
-    draw.text((text_x, card_pos[1] + 8), title, font=FONT_TITLE, fill=fg)
+    draw.text((text_x, card_pos[1] + S(8)), title, font=FONT_TITLE, fill=fg)
 
     diff_name = entry.sheet.difficulty.display_name if entry.sheet.difficulty else "?"
     type_name = entry.sheet.type.value.upper() if entry.sheet.type else "?"
@@ -329,27 +341,27 @@ def _render_cell(
         level_text = f"{level_text} [{entry.sheet.internal_level_value:.1f}]"
     subtext = _truncate_to_width(draw, f"{diff_name} [{type_name}] {level_text}", FONT_SUBTEXT, text_max_width)
     draw.text(
-        (text_x, card_pos[1] + 28),
+        (text_x, card_pos[1] + S(28)),
         subtext,
         font=FONT_SUBTEXT,
         fill=fg,
     )
 
     achievement_text = f"{entry.score.achievement:.4f}%"
-    draw.text((text_x, card_pos[1] + 46), achievement_text, font=FONT_RATING, fill=fg)
+    draw.text((text_x, card_pos[1] + S(46)), achievement_text, font=FONT_RATING, fill=fg)
 
     # icon row - shifted a few px further from the achievement % line
     # above it (was flush at +62, only ~2px clearance from that text)
     icon_x = text_x
-    icon_y = card_pos[1] + 66
+    icon_y = card_pos[1] + S(66)
     rank_tag = rank_tag_for_achievement(entry.score.achievement)
-    used = _paste_icon(base, badge_icons.get(f"rank:{rank_tag}"), (icon_x, icon_y), 20)
-    icon_x += used + (4 if used else 0)
+    used = _paste_icon(base, badge_icons.get(f"rank:{rank_tag}"), (icon_x, icon_y), S(20))
+    icon_x += used + (S(4) if used else 0)
     if entry.score.combo_flag is not None:
-        used = _paste_icon(base, badge_icons.get(f"combo:{entry.score.combo_flag.value}"), (icon_x, icon_y + 2), 16)
-        icon_x += used + (4 if used else 0)
+        used = _paste_icon(base, badge_icons.get(f"combo:{entry.score.combo_flag.value}"), (icon_x, icon_y + S(2)), S(16))
+        icon_x += used + (S(4) if used else 0)
     if entry.score.sync_flag is not None:
-        _paste_icon(base, badge_icons.get(f"sync:{entry.score.sync_flag.value}"), (icon_x, icon_y + 2), 16)
+        _paste_icon(base, badge_icons.get(f"sync:{entry.score.sync_flag.value}"), (icon_x, icon_y + S(2)), S(16))
 
     # chart rating value - the card's actual contribution to the b50
     # total. Bigger/bolder than the achievement % above it and drawn in
@@ -358,18 +370,18 @@ def _render_cell(
     # (including the light remaster palette) - meant to stand out as the
     # one number that matters most on each card, not blend in.
     draw.text(
-        (text_x, card_pos[1] + 90),
+        (text_x, card_pos[1] + S(90)),
         f"{entry.rating}",
         font=FONT_RATING_VALUE,
         fill=RATING_ACCENT_COLOR,
-        stroke_width=1,
+        stroke_width=S(1),
         stroke_fill=(20, 20, 20),
     )
 
     rank_badge = f"#{rank_in_section}"
     badge_width = draw.textlength(rank_badge, font=FONT_RANK_BADGE)
     draw.text(
-        (card_pos[0] + CARD_WIDTH - badge_width - 6, card_pos[1] + CARD_HEIGHT - 18),
+        (card_pos[0] + CARD_WIDTH - badge_width - S(6), card_pos[1] + CARD_HEIGHT - S(18)),
         rank_badge,
         font=FONT_RANK_BADGE,
         fill=fg,
@@ -402,8 +414,8 @@ def _render_section_header(
     clearly at a glance instead of just as whitespace. Spans x0..x1 rather
     than the full canvas, since the two sections now sit side by side and
     each bar has to sit over its own grid block."""
-    draw.rectangle([(x0, top_y), (x1, top_y + 4)], fill=color)
-    draw.text((x0, top_y + 10), label, font=FONT_SECTION_LABEL, fill=color)
+    draw.rectangle([(x0, top_y), (x1, top_y + S(4))], fill=color)
+    draw.text((x0, top_y + S(10)), label, font=FONT_SECTION_LABEL, fill=color)
 
 
 def render_b50(
@@ -433,8 +445,8 @@ def render_b50(
     # header: profile icon + player name + rating badge on the left,
     # Total/B15/B35 stat blocks right-aligned, current-version title logo
     # pinned to the top-right corner beyond them.
-    header_pad = 24
-    icon_size = 96
+    header_pad = S(24)
+    icon_size = S(96)
     icon_x, icon_y = header_pad, (HEADER_HEIGHT - icon_size) // 2
 
     # logo first - the stat blocks lay out leftwards from whatever edge it
@@ -453,18 +465,18 @@ def render_b50(
             logo_w = 0
 
     stats = [("Total", result.total_rating), ("B15", result.b15_total), ("B35", result.b35_total)]
-    stat_x = CANVAS_WIDTH - header_pad - (logo_w + 32 if logo_w else 0)
+    stat_x = CANVAS_WIDTH - header_pad - (logo_w + S(32) if logo_w else 0)
     for label, value in reversed(stats):
         value_text = str(value)
         value_w = draw.textlength(value_text, font=FONT_HEADER_STAT_VALUE)
         label_w = draw.textlength(label, font=FONT_HEADER_STAT_LABEL)
-        block_w = max(value_w, label_w) + 30
+        block_w = max(value_w, label_w) + S(30)
         stat_x -= block_w
-        draw.text((stat_x + (block_w - value_w) / 2, 50), value_text, font=FONT_HEADER_STAT_VALUE, fill=(255, 255, 255))
-        draw.text((stat_x + (block_w - label_w) / 2, 90), label, font=FONT_HEADER_STAT_LABEL, fill=(180, 180, 190))
+        draw.text((stat_x + (block_w - value_w) / 2, S(50)), value_text, font=FONT_HEADER_STAT_VALUE, fill=(255, 255, 255))
+        draw.text((stat_x + (block_w - label_w) / 2, S(90)), label, font=FONT_HEADER_STAT_LABEL, fill=(180, 180, 190))
 
     # slight round, not a full circle - same convention as /cc-display's icon.
-    icon_mask = _rounded_mask((icon_size, icon_size), 10)
+    icon_mask = _rounded_mask((icon_size, icon_size), S(10))
     pasted_icon = False
     if icon_bytes:
         try:
@@ -480,14 +492,14 @@ def render_b50(
         placeholder = Image.new("RGB", (icon_size, icon_size), (200, 200, 205))
         image.paste(placeholder, (icon_x, icon_y), icon_mask)
 
-    content_x = icon_x + icon_size + 16
-    name_max_w = max(40, stat_x - content_x - 16)
+    content_x = icon_x + icon_size + S(16)
+    name_max_w = max(S(40), stat_x - content_x - S(16))
     name = _truncate_to_width(draw, player_name, FONT_HEADER_NAME, name_max_w)
     draw.text((content_x, icon_y), name, font=FONT_HEADER_NAME, fill=(255, 255, 255))
 
     rating_text = str(rating) if rating is not None else "?"
-    badge_h = 44
-    badge_y = icon_y + 44
+    badge_h = S(44)
+    badge_y = icon_y + S(44)
     rating_w = _paste_rating_badge(image, draw, rating_badge_bytes, rating_text, (content_x, badge_y), badge_h, RATING_ACCENT_COLOR)
     if rating_w == 0:
         draw.text((content_x, badge_y), f"Rating {rating_text}", font=FONT_HEADER_STAT_LABEL, fill=(200, 200, 205))
@@ -522,14 +534,14 @@ def render_b50(
 
     divider_x = b35_origin_x + B35_COLS * COL_WIDTH + SECTION_GAP // 2
     draw.rectangle(
-        [(divider_x - 1, label_top), (divider_x + 1, grid_top + GRID_ROWS * ROW_HEIGHT - CELL_PADDING)],
+        [(divider_x - S(1), label_top), (divider_x + S(1), grid_top + GRID_ROWS * ROW_HEIGHT - CELL_PADDING)],
         fill=_DIVIDER_COLOR,
     )
 
     # footer
     footer_y = CANVAS_HEIGHT - FOOTER_HEIGHT
     draw.rectangle([(0, footer_y), (CANVAS_WIDTH, CANVAS_HEIGHT)], fill=(0, 0, 0, 120))
-    draw.text((24, footer_y + 6), "Generated by CiRCLE Chiffon - data from maimai DX NET & dxrating.net // cc.etangaming.xyz // etan • etangaming123 • etangamingxyz", font=FONT_FOOTER, fill=(200, 200, 205))
+    draw.text((S(24), footer_y + S(6)), "Generated by CiRCLE Chiffon - data from maimai DX NET & dxrating.net // cc.etangaming.xyz // etan • etangaming123 • etangamingxyz", font=FONT_FOOTER, fill=(200, 200, 205))
 
     image.save(output, "PNG", compress_level=3)
     output.seek(0)
@@ -547,17 +559,17 @@ def render_b50_template(output) -> None:
     image = Image.new("RGBA", (CANVAS_WIDTH, CANVAS_HEIGHT), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
 
-    header_pad = 24
-    icon_size = 96
+    header_pad = S(24)
+    icon_size = S(96)
     icon_x, icon_y = header_pad, (HEADER_HEIGHT - icon_size) // 2
     _draw_guide_box(draw, (icon_x, icon_y, icon_x + icon_size, icon_y + icon_size), "ICON 96x96")
 
-    content_x = icon_x + icon_size + 16
-    _draw_guide_box(draw, (content_x, icon_y, content_x + 350, icon_y + 34), "PLAYER NAME")
+    content_x = icon_x + icon_size + S(16)
+    _draw_guide_box(draw, (content_x, icon_y, content_x + S(350), icon_y + S(34)), "PLAYER NAME")
 
-    badge_h = 44
-    badge_y = icon_y + 44
-    _draw_guide_box(draw, (content_x, badge_y, content_x + 150, badge_y + badge_h), "RATING BADGE")
+    badge_h = S(44)
+    badge_y = icon_y + S(44)
+    _draw_guide_box(draw, (content_x, badge_y, content_x + S(150), badge_y + badge_h), "RATING BADGE")
 
     # the real render sizes the logo from the fetched PNG's aspect - the
     # live asset is 352x154, so LOGO_HEIGHT maps to ~178px wide.
@@ -569,11 +581,11 @@ def render_b50_template(output) -> None:
         "VERSION LOGO",
     )
 
-    stat_x = CANVAS_WIDTH - header_pad - logo_w - 32
+    stat_x = CANVAS_WIDTH - header_pad - logo_w - S(32)
     for label in ("B35", "B15", "Total"):
-        block_w = 90
+        block_w = S(90)
         stat_x -= block_w
-        _draw_guide_box(draw, (stat_x, 44, stat_x + block_w, 104), f"STAT: {label}")
+        _draw_guide_box(draw, (stat_x, S(44), stat_x + block_w, S(104)), f"STAT: {label}")
 
     label_top = HEADER_HEIGHT
     grid_top = label_top + SECTION_HEADER_H
@@ -603,7 +615,7 @@ def render_b50_template(output) -> None:
             )
             # matches _render_cell's own geometry exactly: jacket top-right,
             # text/icons/rating on the left of it.
-            jacket_pos = (card_pos[0] + CARD_WIDTH - JACKET_SIZE - 4, card_pos[1] + 4)
+            jacket_pos = (card_pos[0] + CARD_WIDTH - JACKET_SIZE - S(4), card_pos[1] + S(4))
             _draw_guide_box(
                 draw,
                 (jacket_pos[0], jacket_pos[1], jacket_pos[0] + JACKET_SIZE, jacket_pos[1] + JACKET_SIZE),
@@ -613,8 +625,8 @@ def render_b50_template(output) -> None:
             # unlabeled outline (the outer card box above already carries
             # the "{section} #{i}" label at this same corner - a second
             # label chip here would just draw over it).
-            text_x = card_pos[0] + 8
-            _draw_guide_box(draw, (text_x, card_pos[1], jacket_pos[0] - 4, card_pos[1] + CARD_HEIGHT), "", color=(0, 200, 255))
+            text_x = card_pos[0] + S(8)
+            _draw_guide_box(draw, (text_x, card_pos[1], jacket_pos[0] - S(4), card_pos[1] + CARD_HEIGHT), "", color=(0, 200, 255))
 
     footer_y = CANVAS_HEIGHT - FOOTER_HEIGHT
     _draw_guide_box(draw, (0, footer_y, CANVAS_WIDTH, CANVAS_HEIGHT), "FOOTER")
