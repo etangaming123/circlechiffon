@@ -4,10 +4,6 @@ from PIL import Image, ImageDraw, ImageFont
 
 from circlechiffon.renderers.b50 import (
     FONT_DIR,
-    FONT_FOOTER,
-    FONT_HEADER_NAME,
-    FONT_HEADER_STAT_LABEL,
-    FONT_HEADER_STAT_VALUE,
     RATING_ACCENT_COLOR,
     _TIER_COLORS,
     _draw_guide_box,
@@ -27,6 +23,9 @@ _JP_MEDIUM = str(FONT_DIR / "NotoSansJP-Medium.ttf")
 _INTER_REGULAR = str(FONT_DIR / "Inter_28pt-Regular.ttf")
 _INTER_BOLD = str(FONT_DIR / "Inter_28pt-Bold.ttf")
 
+FONT_HEADER_NAME = ImageFont.truetype(_JP_BOLD, 34)
+FONT_HEADER_STAT_LABEL = ImageFont.truetype(_INTER_REGULAR, 14)
+FONT_FOOTER = ImageFont.truetype(_INTER_REGULAR, 13)
 FONT_TIER_TITLE = ImageFont.truetype(_JP_BOLD, 16)
 FONT_GRID_COUNT = ImageFont.truetype(_INTER_BOLD, 15)
 FONT_GRID_LABEL = ImageFont.truetype(_INTER_REGULAR, 11)
