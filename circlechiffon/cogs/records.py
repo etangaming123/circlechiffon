@@ -15,6 +15,7 @@ from circlechiffon.adapters.maimai_net.errors import MaimaiNetError, SessionExpi
 from circlechiffon.ratingcalc.best50 import calculate_best50
 from circlechiffon.ratingcalc.calculator import calculate_rating, rank_tag_for_achievement
 from circlechiffon.renderers.b50 import render_b50
+from circlechiffon.renderers.b50_share import build_detail_view_url
 from circlechiffon.songdata.catalog import get_catalog
 from circlechiffon.types import Judgements, RecentScore
 
@@ -248,6 +249,18 @@ class RecentScoresView(discord.ui.View):
                 pass
 
 
+class B50ShareView(discord.ui.View):
+    """Wraps a single link-style button pointing at the b50 detail-view
+    static page (see renderers/b50_share.py). Link buttons are resolved
+    entirely client-side by Discord - no interaction ever reaches the bot for
+    them, so unlike RecentScoresView there's no interaction_check, callback,
+    or timeout-driven disable needed."""
+
+    def __init__(self, share_url: str):
+        super().__init__(timeout=None)
+        self.add_item(discord.ui.Button(label="View Detailed List ↗", style=discord.ButtonStyle.link, url=share_url))
+
+
 class RecordsCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -390,6 +403,7 @@ class RecordsCog(commands.Cog):
 
             catalog = get_catalog()
             result = calculate_best50(scores, catalog, next_update_preview=next_update)
+            share_url = build_detail_view_url(result, catalog)
 
             entries = [e for e in (result.b15 + result.b35) if e is not None]
             if not entries:
@@ -458,6 +472,7 @@ class RecordsCog(commands.Cog):
                 f"-# Preview: simulates next update (B15 = {catalog.current_version} only)\n" if next_update else ""
             )
             filename_suffix = "-preview" if next_update else ""
+            share_note = "" if share_url else "\n-# Detailed list view unavailable this time - use the image above."
             await interaction.edit_original_response(
                 content=(
                     f"{preview_note}"
@@ -467,8 +482,10 @@ class RecordsCog(commands.Cog):
                     f"Floor: New: **{floor_new if floor_new is not None else 'N/A'}**, "
                     f"Old: **{floor_old if floor_old is not None else 'N/A'}**\n"
                     f"-# Rendered in `{elapsed:.2f}s`"
+                    f"{share_note}"
                 ),
                 attachments=[discord.File(buf, filename=f"best50-{profile.display_name}-{timestamp}{filename_suffix}.png")],
+                view=B50ShareView(share_url) if share_url else None,
             )
         except accounts.NotLinked:
             await interaction.edit_original_response(

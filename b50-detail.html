@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<link rel="icon" href="siteresources/icon.png">
+		<meta charset="UTF-8">
+		<meta http-equiv="X-UA-Compatible" content="IE=edge">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<title>Best-50 Detail View - CiRCLE Chiffon</title>
+		<meta name="description" content="Sortable detail view of a maimai DX best-50 rating list, from CiRCLE Chiffon's /cc-best.">
+
+		<meta name="theme-color" content="#FBD796">
+		<!-- Bootstrap -->
+		<link href="siteresources/bootstrap-4.4.1.css" rel="stylesheet">
+		<link href="siteresources/style.css" rel="stylesheet">
+		<link href="siteresources/b50-detail.css" rel="stylesheet">
+	</head>
+	<body>
+		<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+			<a class="navbar-brand" href="index.html">CiRCLE Chiffon</a>
+			<a class="navbar-brand" href="https://github.com/etangaming123/circlechiffon">[view on GitHub]</a>
+		</nav>
+
+		<div class="container-fluid mt-3">
+			<h1 class="text-center">Best-50 Detail View</h1>
+
+			<div id="status-area" class="text-center">
+				<p>Loading...</p>
+			</div>
+
+			<div id="warning-banner" class="alert alert-warning d-none" role="alert"></div>
+
+			<div id="result-area" class="d-none">
+				<div class="d-flex justify-content-between align-items-center flex-wrap mb-2">
+					<div id="summary-text"></div>
+					<button type="button" id="export-json-btn" class="btn btn-success btn-sm">Download dxrating JSON</button>
+				</div>
+
+				<div class="table-responsive">
+					<table class="table b50-table" id="b50-table">
+						<thead>
+							<tr>
+								<th data-sort="bucket">Bucket</th>
+								<th data-sort="jacket">Jacket</th>
+								<th data-sort="title">Title</th>
+								<th data-sort="difficulty">Difficulty</th>
+								<th data-sort="category">Category</th>
+								<th data-sort="achievement">Achievement</th>
+								<th data-sort="flags">Combo / Sync</th>
+								<th data-sort="rating">Rating</th>
+							</tr>
+						</thead>
+						<tbody id="b50-tbody"></tbody>
+					</table>
+				</div>
+			</div>
+		</div>
+
+		<footer class="text-center mt-4">
+			<p>etan • etangaming123 • etangamingxyz</p>
+		</footer>
+
+		<script src="siteresources/b50-detail.js"></script>
+	</body>
+</html>

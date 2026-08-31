@@ -1,0 +1,94 @@
+#status-area p,
+#summary-text {
+	color: white;
+}
+
+.b50-table {
+	color: white;
+	background-color: #151d38;
+	border-collapse: separate;
+	border-spacing: 0;
+}
+
+.b50-table thead th {
+	background-color: #062E95;
+	color: white;
+	cursor: pointer;
+	user-select: none;
+	white-space: nowrap;
+	position: sticky;
+	top: 0;
+}
+
+.b50-table thead th:hover {
+	background-color: #0a3ec4;
+}
+
+.b50-table thead th.sort-asc::after {
+	content: " \25B2";
+}
+
+.b50-table thead th.sort-desc::after {
+	content: " \25BC";
+}
+
+.b50-table td,
+.b50-table th {
+	border-color: #2a355c;
+	vertical-align: middle;
+}
+
+.jacket-thumb {
+	width: 56px;
+	height: 56px;
+	object-fit: cover;
+	border-radius: 4px;
+}
+
+.title-cell {
+	max-width: 320px;
+}
+
+.category-cell {
+	white-space: nowrap;
+	color: #b8c2e6;
+}
+
+.diff-pill {
+	display: inline-block;
+	padding: 2px 10px;
+	border-radius: 999px;
+	font-weight: 600;
+	font-size: 0.85rem;
+	white-space: nowrap;
+}
+
+.achievement-cell {
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+
+.rating-cell {
+	font-weight: 700;
+	color: #FBD796;
+	text-align: right;
+}
+
+.bucket-cell {
+	font-weight: 600;
+	color: #B8DB7E;
+}
+
+.flags-cell {
+	white-space: nowrap;
+}
+
+.flag-badge {
+	height: 24px;
+	margin-right: 4px;
+}
+
+#warning-banner {
+	max-width: 900px;
+	margin: 0 auto 1rem auto;
+}
