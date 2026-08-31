@@ -258,6 +258,14 @@ const SORT_ACCESSORS = {
 	rating: (r) => (r.rating != null ? r.rating : -1),
 };
 
+// tie-break, applied after the primary column compares equal - matches
+// ratingcalc/best50.py's own sort key (rating, achievement), which prefers
+// higher achievement on a rating tie regardless of which direction the
+// primary column is currently sorted.
+const SORT_TIEBREAKS = {
+	rating: (r) => -r.achievement,
+};
+
 function renderTable(rows) {
 	const tbody = document.getElementById("b50-tbody");
 	tbody.innerHTML = "";
@@ -280,11 +288,18 @@ function setupSorting(rows) {
 			document.querySelectorAll("#b50-table th[data-sort]").forEach((h) => h.classList.remove("sort-asc", "sort-desc"));
 			th.classList.add(sortAsc ? "sort-asc" : "sort-desc");
 			const accessor = SORT_ACCESSORS[sortKey];
+			const tiebreak = SORT_TIEBREAKS[sortKey];
 			rows.sort((a, b) => {
 				const av = accessor(a);
 				const bv = accessor(b);
 				if (av < bv) return sortAsc ? -1 : 1;
 				if (av > bv) return sortAsc ? 1 : -1;
+				if (tiebreak) {
+					const at = tiebreak(a);
+					const bt = tiebreak(b);
+					if (at < bt) return -1;
+					if (at > bt) return 1;
+				}
 				return 0;
 			});
 			renderTable(rows);
