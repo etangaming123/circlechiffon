@@ -6,15 +6,18 @@ _INTER_BOLD = str(FONT_DIR / "Inter_28pt-Bold.ttf")
 
 # Matches the real maimai DX NET achievement gauge widget: a row of
 # same-size cells, each worth 100% achievement, followed by a stadium-
-# shaped "Achievement Progress" readout pill. Segment count is fixed at 8
+# shaped "Achievement Progress" readout pill. Segment count is fixed at 10
 # (not derived from the value) so the bar has a stable size regardless of
-# how high a circle's cumulative achievement climbs - values above 800%
+# how high a circle's cumulative achievement climbs - values above 1000%
 # just read as a fully-filled bar, same clamp-for-display philosophy as
 # cogs/circle.py's text _gauge_bar.
-SEGMENT_COUNT = 8
+SEGMENT_COUNT = 10
 SEGMENT_VALUE = 100.0
 
-CANVAS_W, CANVAS_H = 440, 150
+# CANVAS_W widened from the original 8-segment 440px so each segment keeps
+# its original ~46px cell width (and 4px gap) with 10 segments instead of 8 -
+# bar_w = cell_w * count + gap * (count - 1); CANVAS_W = bar_w + 2 * _BAR_X0.
+CANVAS_W, CANVAS_H = 540, 150
 
 _PANEL_MARGIN = 6
 _PANEL_RADIUS = 16
