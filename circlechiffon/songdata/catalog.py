@@ -73,6 +73,13 @@ class SongCatalog:
         # is useless to search for or display anyway)
         self.songs: list[Song] = [s for s in (_parse_song(r) for r in raw.get("songs", [])) if s.title.strip()]
         self._by_id: dict[str, Song] = {s.song_id: s for s in self.songs}
+        # stable position of each song within self.songs - the b50 detail-view
+        # link (renderers/b50_share.py) encodes a chart as this index rather
+        # than its title/song_id, to keep the URL payload compact. The
+        # static site (b50-detail.js) rebuilds the identical ordered list from
+        # the same data/dxdata.json to decode it, so this ordering must never
+        # be reshuffled independently of that file.
+        self._index_by_id: dict[str, int] = {s.song_id: i for i, s in enumerate(self.songs)}
 
         # extend (not replace) each song's own searchAcronyms with extra
         # aliases pulled live from dxrating.net - search() already treats
@@ -104,6 +111,9 @@ class SongCatalog:
     def get_by_title(self, title: str) -> Song | None:
         matches = self._by_title_lower.get(title.lower())
         return matches[0] if matches else None
+
+    def index_of(self, song_id: str) -> int | None:
+        return self._index_by_id.get(song_id)
 
     def find_sheet(self, title: str, chart_type: "ChartType | None", difficulty: "Difficulty | None") -> "Sheet | None":
         """Look up a specific chart's constant by (title, type, difficulty),
