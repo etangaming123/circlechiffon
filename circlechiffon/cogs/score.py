@@ -9,9 +9,17 @@ from circlechiffon.adapters.dxrating.images import jacket_url
 from circlechiffon.adapters.maimai_net.errors import MaimaiNetError, SessionExpired
 from circlechiffon.ratingcalc.calculator import rank_tag_for_achievement
 from circlechiffon.songdata.catalog import get_catalog
-from circlechiffon.types import Difficulty, FriendEntry, Score, Song, SongPlayStats
+from circlechiffon.types import ChartType, Difficulty, FriendEntry, Score, Song, SongPlayStats
 
 _DIFFICULTY_ORDER = [Difficulty.basic, Difficulty.advanced, Difficulty.expert, Difficulty.master, Difficulty.remaster]
+
+# Same enum, same two choices, same default-DX-else-available shape as
+# cogs/chart.py's _CHART_TYPE_CHOICES/wanted_type - the established pattern
+# for a DX/STD command parameter in this codebase.
+_CHART_TYPE_CHOICES = [
+    app_commands.Choice(name="DX", value=ChartType.dx.value),
+    app_commands.Choice(name="Standard", value=ChartType.std.value),
+]
 
 # Friend score pages carry far less than your own record pages do - see
 # parse_friend_scores: achievement, combo and sync flags only, with no raw DX
@@ -29,24 +37,30 @@ class NoScoresRecorded(Exception):
     charts but the player has no recorded score on any of them."""
 
 
-def available_difficulties(song: Song) -> list[Difficulty]:
-    present = {s.difficulty for s in song.sheets if s.difficulty is not None}
+def available_difficulties(song: Song, chart_type: ChartType) -> list[Difficulty]:
+    # DX and STD sheets under one title don't always share the same
+    # difficulty set (confirmed live: 11/81 dual-type songs differ, e.g.
+    # POP TEAM EPIC has no DX Re:MASTER but does have a STD one) - filtering
+    # by chart_type here, not just by score afterward, keeps the toggle from
+    # offering a difficulty the resolved chart type doesn't actually have.
+    present = {s.difficulty for s in song.sheets if s.difficulty is not None and s.type == chart_type}
     return [d for d in _DIFFICULTY_ORDER if d in present]
 
 
-def _matching_scores(scores: list[Score], title: str, difficulty: Difficulty) -> list[Score]:
-    return [s for s in scores if s.title == title and s.difficulty == difficulty]
+def _matching_scores(scores: list[Score], title: str, difficulty: Difficulty, chart_type: ChartType) -> list[Score]:
+    return [s for s in scores if s.title == title and s.difficulty == difficulty and s.chart_type == chart_type]
 
 
 def _score_embed(
     song: Song,
     difficulty: Difficulty,
+    chart_type: ChartType,
     scores: list[Score],
     play_stats: dict[Difficulty, SongPlayStats],
     player_name: str,
     footer_note: str | None = None,
 ) -> discord.Embed:
-    matches = _matching_scores(scores, song.title, difficulty)
+    matches = _matching_scores(scores, song.title, difficulty, chart_type)
     if matches:
         best = max(matches, key=lambda s: s.achievement)
         color = embed_colors.rank_color(rank_tag_for_achievement(best.achievement))
@@ -100,6 +114,7 @@ class ScoreToggleView(discord.ui.View):
         self,
         invoker_id: int,
         song: Song,
+        chart_type: ChartType,
         scores: list[Score],
         difficulties: list[Difficulty],
         play_stats: dict[Difficulty, SongPlayStats],
@@ -109,6 +124,7 @@ class ScoreToggleView(discord.ui.View):
         super().__init__(timeout=30)
         self.invoker_id = invoker_id
         self.song = song
+        self.chart_type = chart_type
         self.scores = scores
         self.difficulties = difficulties
         self.play_stats = play_stats
@@ -126,6 +142,7 @@ class ScoreToggleView(discord.ui.View):
         return _score_embed(
             self.song,
             self.difficulties[self.index],
+            self.chart_type,
             self.scores,
             self.play_stats,
             self.player_name,
@@ -166,19 +183,38 @@ async def build_score_view(
     invoker_id: int,
     song: Song,
     *,
+    chart_type: ChartType | None = None,
     friend: FriendEntry | None = None,
     on_retry: Callable[[], Awaitable[None]] | None = None,
     on_progress: Callable[[str], Awaitable[None]] | None = None,
 ) -> ScoreToggleView | None:
     """Fetches scores for one song and builds a ScoreToggleView defaulted to
-    the song's highest available difficulty. With `friend` given, the scores
-    are that friend's rather than the invoker's - the invoker's own session
-    is still what fetches them, so the account/session errors below are the
+    the song's highest available difficulty. `chart_type` picks DX or STD;
+    None resolves to DX, falling back to STD if the song has no DX chart (or
+    to whichever type was actually requested, if that specific type turns
+    out not to exist for this song). With `friend` given, the scores are
+    that friend's rather than the invoker's - the invoker's own session is
+    still what fetches them, so the account/session errors below are the
     same either way. Returns None if the song has no standard-difficulty
-    charts. Propagates the usual account/session errors
+    charts at all. Propagates the usual account/session errors
     (NotLinked/SessionExpired/MaimaiNetError) for the caller to handle in
     whatever way fits its own command's UI."""
-    difficulties = available_difficulties(song)
+    types_present = {s.type for s in song.sheets if s.type in (ChartType.dx, ChartType.std)}
+    if not types_present:
+        return None
+
+    expected_type = chart_type or ChartType.dx
+    resolved_type = chart_type if chart_type in types_present else (
+        ChartType.dx if ChartType.dx in types_present else ChartType.std
+    )
+    fallback_note = None
+    if resolved_type != expected_type:
+        fallback_note = (
+            f"No {expected_type.value.upper()} chart for this song - showing "
+            f"{resolved_type.value.upper()} instead."
+        )
+
+    difficulties = available_difficulties(song, resolved_type)
     if not difficulties:
         return None
 
@@ -190,10 +226,15 @@ async def build_score_view(
             return scores, {}, friend.profile.display_name
 
         scores = await client.get_music_scores()
-        # any one of this song's score rows carries an idx that reaches the
-        # same musicDetail page - it covers every difficulty at once, so one
-        # extra fetch here is enough regardless of which difficulty is shown.
-        idx = next((s.idx for s in scores if s.title == song.title and s.idx), None)
+        # any one of this song's score rows of the resolved chart type
+        # carries an idx that reaches the same musicDetail page - it covers
+        # every difficulty of that same chart type at once (DX and STD are
+        # separate idx values/pages with independent data, so this is
+        # already scoped to the one type this view is showing).
+        idx = next(
+            (s.idx for s in scores if s.title == song.title and s.idx and s.chart_type == resolved_type),
+            None,
+        )
         play_stats = await client.get_song_play_stats(idx) if idx is not None else {}
         # normally free - login records the name - but an account whose login
         # couldn't read its profile has none stored, so recover it once here.
@@ -205,18 +246,19 @@ async def build_score_view(
 
     scores, play_stats, player_name = await accounts.with_client(invoker_id, fetch, on_retry=on_retry)
 
-    scored_difficulties = [d for d in difficulties if _matching_scores(scores, song.title, d)]
+    scored_difficulties = [d for d in difficulties if _matching_scores(scores, song.title, d, resolved_type)]
     if not scored_difficulties:
         raise NoScoresRecorded()
 
     return ScoreToggleView(
         invoker_id,
         song,
+        resolved_type,
         scores,
         scored_difficulties,
         play_stats,
         player_name,
-        _FRIEND_DATA_NOTE if friend is not None else None,
+        _FRIEND_DATA_NOTE if friend is not None else fallback_note,
     )
 
 
@@ -228,14 +270,23 @@ class ScoreCog(commands.Cog):
     @app_commands.describe(
         title="Song title (or part of it, including aliases) to search for",
         friend="Friend's display name (or their exact id from /cc-friends show_ids:True). Omit for your own scores.",
+        chart="DX or Standard chart, for songs that have both (default: DX)",
     )
+    @app_commands.choices(chart=_CHART_TYPE_CHOICES)
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-    async def score(self, interaction: discord.Interaction, title: str, friend: str | None = None):
+    async def score(
+        self,
+        interaction: discord.Interaction,
+        title: str,
+        friend: str | None = None,
+        chart: app_commands.Choice[str] | None = None,
+    ):
         if not await access.handle_command_access(interaction, interaction.user.id, "cc-scores", access.MAIMAI_NET_COOLDOWN):
             return
         await interaction.response.defer()
         await interaction.edit_original_response(content="Getting data...")
+        chart_type = ChartType(chart.value) if chart else None
 
         try:
             catalog = get_catalog()
@@ -246,7 +297,7 @@ class ScoreCog(commands.Cog):
             song = results[0]
 
             if friend is None:
-                await self._send_score_view(interaction, song)
+                await self._send_score_view(interaction, song, chart_type=chart_type)
                 return
 
             # /cc-friend-profile's exact resolution flow, reused wholesale:
@@ -267,14 +318,14 @@ class ScoreCog(commands.Cog):
                 return
             if isinstance(resolved, list):
                 async def on_pick(component_interaction: discord.Interaction, entry: FriendEntry):
-                    await self._send_score_view(component_interaction, song, friend=entry)
+                    await self._send_score_view(component_interaction, song, friend=entry, chart_type=chart_type)
 
                 view = FriendPickView(interaction.user.id, resolved, on_pick)
                 await interaction.edit_original_response(content=_pick_prompt(resolved), view=view)
                 view.message = await interaction.original_response()
                 return
 
-            await self._send_score_view(interaction, song, friend=resolved)
+            await self._send_score_view(interaction, song, friend=resolved, chart_type=chart_type)
         except accounts.NotLinked:
             await interaction.edit_original_response(
                 content="You haven't linked a maimai DX NET account yet. Run `/cc-login` first."
@@ -289,7 +340,11 @@ class ScoreCog(commands.Cog):
             )
 
     async def _send_score_view(
-        self, interaction: discord.Interaction, song: Song, friend: FriendEntry | None = None
+        self,
+        interaction: discord.Interaction,
+        song: Song,
+        friend: FriendEntry | None = None,
+        chart_type: ChartType | None = None,
     ):
         """Fetches the scores and edits `interaction`'s response with the
         toggle view. Works from either the original slash-command interaction
@@ -320,6 +375,7 @@ class ScoreCog(commands.Cog):
             view = await build_score_view(
                 interaction.user.id,
                 song,
+                chart_type=chart_type,
                 friend=friend,
                 on_retry=accounts.default_retry_notice(interaction),
                 on_progress=on_progress,

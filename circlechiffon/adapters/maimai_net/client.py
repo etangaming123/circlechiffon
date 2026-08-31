@@ -732,17 +732,37 @@ class MaimaiNetClient:
     async def get_song_play_stats(self, idx: str) -> dict[Difficulty, SongPlayStats]:
         """Best-effort fetch of a song's per-difficulty play count and last-
         played timestamp from its musicDetail page (confirmed live: the idx
-        of any one of the song's score rows reaches a page listing every
-        difficulty's own stats). Returns {} rather than raising if the page
-        doesn't parse as expected - this is enrichment on top of the score
-        itself, never worth failing the whole command over."""
-        try:
-            html = await self._get_page(f"{urls.INTL['MUSIC_DETAIL_PAGE']}?idx={idx}")
-        except (SessionExpired, MaintenanceError):
-            raise
-        except MaimaiNetError:
-            return {}
-        return parse_song_play_stats(html)
+        of any one of a chart's score rows reaches a page listing every
+        difficulty's own stats - but only for that same chart type. A title
+        with both a DX and a STD chart has two separate idx values reaching
+        two separate pages with independent data; callers that want both
+        types' stats must fetch each type's own idx). Returns {} rather than
+        raising if the page doesn't parse as expected - this is enrichment
+        on top of the score itself, never worth failing the whole command
+        over.
+
+        Retries once on a non-session MaimaiNetError before giving up:
+        _get_page's own retry ladder only re-mints/escalates to SessionExpired
+        for session-suspect codes (see _classify_error_page) - a plain
+        transient hiccup or an unrecognized error code that never clears
+        through that whole ladder surfaces here as a bare TransientNetError
+        instead. Unlike get_music_scores' 6-way fan-out, this is a single
+        unredundant fetch, so one unlucky hiccup here has no other request to
+        fall back on - a second full attempt (fresh _get_page call, ladder
+        and all) is cheap insurance against exactly that."""
+        for attempt in range(2):
+            try:
+                html = await self._get_page(f"{urls.INTL['MUSIC_DETAIL_PAGE']}?idx={idx}")
+            except (SessionExpired, MaintenanceError):
+                raise
+            except MaimaiNetError as e:
+                if attempt == 0:
+                    continue
+                print(f"get_song_play_stats(idx={idx}) swallowed: {type(e).__name__}: {e}")
+                return {}
+            else:
+                return parse_song_play_stats(html)
+        return {}
 
     async def get_friend_list(self) -> list[FriendEntry]:
         """Confirmed live: /friend/ lists every friend as a profile-card row
