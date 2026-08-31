@@ -219,6 +219,7 @@ function badgeImg(fileMap, flag) {
 
 function buildRow(row) {
 	const tr = document.createElement("tr");
+	tr.classList.add(row.bucket === "B15" ? "row-new" : "row-old");
 
 	tr.appendChild(el("td", { class: "bucket-cell" }, [document.createTextNode(row.bucket)]));
 

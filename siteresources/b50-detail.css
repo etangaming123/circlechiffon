@@ -3,6 +3,10 @@
 	color: white;
 }
 
+#page-container {
+	max-width: 1100px;
+}
+
 .b50-table {
 	color: white;
 	background-color: #151d38;
@@ -36,6 +40,24 @@
 .b50-table th {
 	border-color: #2a355c;
 	vertical-align: middle;
+}
+
+/* B15 (new-version charts) vs B35 (old-version charts) - light tint over
+   the dark table background, same bucket the image render uses. */
+.b50-table tbody tr.row-new {
+	background-color: rgba(255, 176, 210, 0.3);
+}
+
+.b50-table tbody tr.row-old {
+	background-color: rgba(140, 190, 255, 0.3);
+}
+
+.b50-table tbody tr.row-new:hover {
+	background-color: rgba(255, 176, 210, 0.5);
+}
+
+.b50-table tbody tr.row-old:hover {
+	background-color: rgba(140, 190, 255, 0.5);
 }
 
 .jacket-thumb {
