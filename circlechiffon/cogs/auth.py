@@ -110,8 +110,8 @@ class SegaLoginModal(discord.ui.Modal, title="Link your maimai DX NET account"):
         )
         await interaction.edit_original_response(
             content=(
-                "Login successful! Linked your maimai DX NET account"
-                + (f" as **{profile.display_name}**." if profile else ".")
+                "Login successful! Welcome, "
+                + (f"**{profile.display_name}**!" if profile else "!")
                 + credential_note
             )
         )
@@ -163,7 +163,7 @@ class AuthCog(commands.Cog):
     @app_commands.describe(
         remember_password=(
             "Also store your SEGA ID password (encrypted) so I can auto re-login when your session "
-            "expires. Less secure than the default - shows a warning first."
+            "expires. Use at your own risk."
         )
     )
     @app_commands.allowed_installs(guilds=True, users=True)

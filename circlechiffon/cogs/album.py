@@ -81,7 +81,7 @@ class AlbumView(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.invoker_id:
             await interaction.response.send_message(
-                "Only the person who ran this command can page through it.", ephemeral=True
+                "This isn't your embed!", ephemeral=True
             )
             return False
         return True

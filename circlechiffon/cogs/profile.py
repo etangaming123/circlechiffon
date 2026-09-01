@@ -122,7 +122,7 @@ class ProfileCog(commands.Cog):
             attachments=[discord.File(buf, filename=f"profile-{view_value}-{profile.display_name}-{timestamp}.png")],
         )
 
-    @app_commands.command(name="cc-display", description="It's close enough to the real cab display, I guess.")
+    @app_commands.command(name="cc-display", description="Render your profile as it would appear on the maimai DX cab display (not accurate)")
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def display(self, interaction: discord.Interaction):

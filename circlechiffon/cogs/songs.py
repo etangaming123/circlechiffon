@@ -36,16 +36,12 @@ def _build_generic_embed(song: Song) -> discord.Embed:
     for sheet in song.sheets:
         diff_name = sheet.difficulty.display_name if sheet.difficulty else "UTAGE"
         type_name = sheet.type.value.upper() if sheet.type else "?"
-        const_str = f" (constant {sheet.internal_level_value})" if sheet.internal_level_value else ""
-        version_str = (
-            f" - Version: {sheet.version}" + (f" ({sheet.release_date})" if sheet.release_date else "")
-            if sheet.version
-            else ""
-        )
-        lines.append(f"**{diff_name}** [{type_name}] - {sheet.level}{const_str}{version_str}")
+        const_str = f" [{sheet.internal_level_value}]" if sheet.internal_level_value else ""
+        lines.append(f"**{diff_name}** [{type_name}] - {sheet.level}{const_str}")
 
     embed = discord.Embed(title=song.title, description=song.artist or "", color=embed_colors.GENERIC)
     embed.add_field(name="Charts", value="\n".join(lines) or "No chart data", inline=False)
+    embed.add_field(name="Release date", value=f"{song.sheets[0].release_date} - {song.sheets[0].version}" or "Unknown", inline=True)
     if song.search_acronyms:
         embed.set_footer(text=f"Aliases: {', '.join(song.search_acronyms)}")
     return embed
@@ -53,9 +49,6 @@ def _build_generic_embed(song: Song) -> discord.Embed:
 
 async def _build_detailed_embed(song: Song, difficulty: Difficulty) -> discord.Embed:
     matching_sheets = [s for s in song.sheets if s.difficulty == difficulty]
-
-    # All difficulties of a chart are assumed to have been added in the same
-    # update, so show the version once for the embed rather than per-sheet.
     version_sheet = next((s for s in matching_sheets if s.version), None)
     description_lines = [song.artist] if song.artist else []
     if version_sheet:
@@ -78,7 +71,7 @@ async def _build_detailed_embed(song: Song, difficulty: Difficulty) -> discord.E
 
     for sheet in matching_sheets:
         type_name = sheet.type.value.upper() if sheet.type else "?"
-        lines = [f"Level **{sheet.level}** (constant {sheet.internal_level_value})"]
+        lines = [f"Level **{sheet.level}** [{sheet.internal_level_value}]"]
         if sheet.note_designer and sheet.note_designer.strip("-").strip():
             # dxdata.json uses a literal "-" placeholder for uncredited charts
             lines.append(f"Charter: {sheet.note_designer}")

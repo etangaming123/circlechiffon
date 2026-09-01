@@ -241,11 +241,9 @@ class ConfirmHeavyView(discord.ui.View):
 
 def _heavy_warning(song: Song, difficulty: Difficulty) -> str:
     return (
-        f"**{song.title}** [{difficulty.display_name}] - heads up, this is an intensive command.\n"
-        "It fetches **one page per friend** from maimai DX NET, so on an account with ~50 "
-        "friends that's ~50 requests and can take a while. Switching difficulty afterwards "
-        "runs the same fan-out again for that difficulty.\n"
-        f"-# Cooldown is {access.MAIMAI_NET_HEAVY_COOLDOWN}s once it starts. Cancelling costs you nothing."
+        f"About to fetch friend scores for {song.title} [{difficulty.display_name}]..."
+        "Hold up! This command is a heavy command. It will take quite a bit, and it fetches a bunch of data. If you'd like to proceed, please confirm below."
+        f"-# Cooldown is {access.MAIMAI_NET_HEAVY_COOLDOWN}s after clicking the button. If you cancel, the cooldown will not be activated."
     )
 
 
@@ -545,7 +543,7 @@ class FriendsCog(commands.Cog):
 
     @app_commands.command(
         name="cc-friend-profile",
-        description="View a friend's (limited) maimai DX NET profile - SEGA exposes far less for friends than for you",
+        description="View a friend's (limited) maimai DX NET profile.",
     )
     @app_commands.describe(friend="Friend's display name (or their exact id from /cc-friends show_ids:True)")
     @app_commands.allowed_installs(guilds=True, users=True)
@@ -613,8 +611,7 @@ class FriendsCog(commands.Cog):
             if entry.comment:
                 embed.add_field(name="Comment", value=entry.comment, inline=False)
             embed.set_footer(
-                text="Friend profiles are limited - SEGA doesn't expose play counts or "
-                "clear-count grids for anyone but yourself."
+                text="Visible friend data is limited."
             )
 
             files = []
@@ -761,8 +758,6 @@ class FriendsCog(commands.Cog):
             timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
             await interaction.edit_original_response(
                 content=(
-                    f"-# Computed locally from scraped achievements - not SEGA's own rating number, "
-                    f"which isn't shown for friends\n"
                     f"Computed rating: **{result.total_rating}** "
                     f"(New Charts: **{result.b15_total}**, Old Charts: **{result.b35_total}**)\n"
                     f"-# Rendered in `{elapsed:.2f}s`"

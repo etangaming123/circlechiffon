@@ -41,10 +41,7 @@ def _members_embed(circle: Circle, members: list[CircleMember], page: int, page_
         embed.description = "\n".join(_line(i, m) for i, m in enumerate(chunk))
     else:
         embed.description = (
-            "No member list available. This page is best-effort - maimai DX NET's "
-            "circle member roster markup wasn't confirmed live ahead of time - "
-            "or it may be temporarily unavailable, since it errored intermittently "
-            "even during manual testing."
+            "No member list available."
         )
     embed.set_footer(text=f"Page {page + 1}/{max(page_count, 1)} - {len(members)} member(s)")
     return embed
@@ -71,7 +68,7 @@ class CircleMembersView(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.invoker_id:
             await interaction.response.send_message(
-                "Only the person who ran this command can page through it.", ephemeral=True
+                "This isn't your embed!", ephemeral=True
             )
             return False
         return True
@@ -152,8 +149,7 @@ class CircleCog(commands.Cog):
 
             if circle is None:
                 await interaction.edit_original_response(
-                    content="You don't appear to be in a Circle right now, or the Circle profile page "
-                    "returned an unexpected layout."
+                    content="You don't appear to be in a Circle right now."
                 )
                 return
 
