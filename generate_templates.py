@@ -18,6 +18,7 @@ from pathlib import Path
 
 from circlechiffon.renderers.b50 import render_b50_template
 from circlechiffon.renderers.display import render_display_template
+from circlechiffon.renderers.judgement_detail import render_judgement_detail_template
 from circlechiffon.renderers.profile import render_profile_core_template, render_profile_extras_template
 
 # anchored to this file's own directory rather than a bare relative name -
@@ -33,6 +34,7 @@ _GENERATORS = {
     "display_template.png": render_display_template,
     "profile_core_template.png": render_profile_core_template,
     "profile_extras_template.png": render_profile_extras_template,
+    "judgement_detail_template.png": render_judgement_detail_template,
 }
 
 

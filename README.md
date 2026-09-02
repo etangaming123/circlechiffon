@@ -34,7 +34,8 @@ Commands marked 🔗 need a linked SEGA ID account. Everything else works with n
 
 * 🔗 `/cc-profile` — Your Player's Data image: name, title, rating, rank badges, play counts and the full clear-count grid (`view:Extra` shows class points, miles, missions and tickets instead)
 * 🔗 `/cc-display` — Your nameplate, rendered close to how the real cab displays it
-* 🔗 `/cc-recent` — Page through your recent plays one *credit* at a time, with a dropdown to drill into a single track's judgment counts and DX score
+* 🔗 `/cc-recent` — Page through your recent plays 25 at a time, with a dropdown to drill into a single track's judgment counts and DX score
+* 🔗 `/cc-recent-detail` — Same browse UI as `/cc-recent`, but renders a track's judgement-count breakdown as an image instead of text
 * 🔗 `/cc-best` — Your Best-50 rating image (B15 + B35), styled after dxrating.net's
 * 🔗 `/cc-album` — Browse your maimai DX NET photo album
 
