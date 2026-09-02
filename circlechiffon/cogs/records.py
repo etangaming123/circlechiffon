@@ -14,7 +14,7 @@ from circlechiffon.adapters.maimai_site.version_logo import get_version_logo
 from circlechiffon.adapters.maimai_net.errors import MaimaiNetError, SessionExpired
 from circlechiffon.ratingcalc.best50 import calculate_best50
 from circlechiffon.ratingcalc.calculator import calculate_rating, rank_tag_for_achievement
-from circlechiffon.ratingcalc.judgement_loss import JudgementLoss, calculate_judgement_loss
+from circlechiffon.ratingcalc.judgement_loss import calculate_judgement_loss
 from circlechiffon.renderers.b50 import render_b50
 from circlechiffon.renderers.b50_share import build_detail_view_url
 from circlechiffon.renderers.judgement_detail import render_judgement_detail
@@ -22,11 +22,36 @@ from circlechiffon.songdata.catalog import get_catalog
 from circlechiffon.types import Judgements, RecentScore
 
 
+def _group_by_credit(scores: list[RecentScore]) -> list[list[RecentScore]]:
+    """maimai DX NET numbers each play TRACK 01, TRACK 02, ... starting over
+    at 1 for every new credit. Whether the scraped list presents a credit's
+    tracks ascending (1,2,3,4) or descending (4,3,2,1) isn't confirmed, so
+    rather than special-case track_no == 1 (which only groups correctly for
+    one of those two orderings), a new group starts wherever the track_no
+    sequence breaks continuity - i.e. doesn't simply step by 1 from the
+    previous entry. This works the same regardless of which direction the
+    list turns out to run. Scores with no track_no (parse failure) always
+    start a new group, since continuity can't be determined for them."""
+    groups: list[list[RecentScore]] = []
+    current: list[RecentScore] = []
+    prev_track_no: int | None = None
+    for score in scores:
+        if current and (score.track_no is None or prev_track_no is None or abs(score.track_no - prev_track_no) != 1):
+            groups.append(current)
+            current = []
+        current.append(score)
+        prev_track_no = score.track_no
+    if current:
+        groups.append(current)
+    return groups
+
+
 def _chunk_scores(scores: list[RecentScore], size: int = 25) -> list[list[RecentScore]]:
-    """Flat pagination, 25 per page (Discord's own Select option cap) -
-    replaces the old per-credit grouping so a page always holds as many
-    tracks as the dropdown can show at once, regardless of how many credits
-    those tracks happen to span."""
+    """Flat 25-wide blocks (Discord's own Select option cap) feeding ONLY
+    the track-picker dropdown - a separate axis from the credit-grouped
+    overview embeds (_group_by_credit), so the dropdown can offer any of
+    the last 25/50/... plays regardless of which credit is currently shown
+    on screen."""
     return [scores[i : i + size] for i in range(0, len(scores), size)]
 
 
@@ -34,62 +59,11 @@ def _fmt(value: int | None) -> str:
     return f"{value:,}" if value is not None else "-"
 
 
-def _format_judgement_table(judgements: Judgements) -> str:
-    """Fixed-width table matching maimai DX NET's own detail page layout:
-    one row per note type, one column per judgment tier."""
-    rows = [
-        ("TAP", judgements.tap),
-        ("HOLD", judgements.hold),
-        ("SLIDE", judgements.slide),
-        ("TOUCH", judgements.touch),
-        ("BREAK", judgements.brk),
-    ]
-    lines = [f"{'':<7}{'CritP':>6}{'Perf':>6}{'Great':>6}{'Good':>6}{'Miss':>6}"]
-    for label, nt in rows:
-        if nt is None:
-            continue
-        lines.append(
-            f"{label + ':':<7}{_fmt(nt.critical_perfect):>6}{_fmt(nt.perfect):>6}"
-            f"{_fmt(nt.great):>6}{_fmt(nt.good):>6}{_fmt(nt.miss):>6}"
-        )
-    return "\n".join(lines)
-
-
-def _fmt_loss(value: float | tuple[float, float]) -> str:
-    if isinstance(value, tuple):
-        lo, hi = value
-        return f"{lo:.1f}~{hi:.1f}%"
-    return f"{value:.1f}%"
-
-
-def _format_judgement_loss_table(judgements: Judgements, loss: JudgementLoss) -> str:
-    """'lost_only' sibling of _format_judgement_table - same fixed-width 5x5
-    grid, but every cell shows that cell's lost-achievement% instead of its
-    raw count. CRIT PERFECT/PERFECT (except BREAK's PERFECT) are always 0
-    loss and render as '-', same convention as a missing count."""
-    rows = [("TAP", "tap"), ("HOLD", "hold"), ("SLIDE", "slide"), ("TOUCH", "touch"), ("BREAK", "brk")]
-    loss_by_attr = {row.attr: row for row in loss.rows}
-    lines = [f"{'':<7}{'CritP':>8}{'Perf':>8}{'Great':>8}{'Good':>8}{'Miss':>8}"]
-    for label, attr in rows:
-        if getattr(judgements, attr) is None:
-            continue
-        cells = loss_by_attr[attr].cells
-        cols = [
-            _fmt_loss(cells[c]) if c in cells else "-"
-            for c in ("critical_perfect", "perfect", "great", "good", "miss")
-        ]
-        lines.append(f"{label + ':':<7}" + "".join(f"{c:>8}" for c in cols))
-    return "\n".join(lines)
-
-
-def _build_track_embed(
-    score: RecentScore,
-    jacket_index: int,
-    has_jacket: bool,
-    judgements: Judgements | None,
-    show_detail: bool,
-    text_mode: str = "counts",
-) -> discord.Embed:
+def _score_summary(score: RecentScore) -> tuple[str, str, list[str]]:
+    """Shared by the overview per-track embed and the single-track detail
+    embed: (subtitle, rank_tag, detail_lines) - subtitle is e.g.
+    'MASTER 13+ (13.8)', detail_lines is the RANK/ACC, DXSCORE/RATING,
+    Combo/Sync trio both embeds show."""
     catalog = get_catalog()
     sheet = catalog.find_sheet(score.title, score.chart_type, score.difficulty)
     rating = None
@@ -99,35 +73,9 @@ def _build_track_embed(
     diff_name = score.difficulty.display_name if score.difficulty else "?"
     rank_tag = rank_tag_for_achievement(score.achievement)
 
-    embed = discord.Embed(title=score.title, color=embed_colors.rank_color(rank_tag))
-    if score.track_no is not None:
-        embed.set_author(name=f"TRACK {score.track_no:02d}")
-
     subtitle = f"{diff_name} {sheet.level}" if sheet is not None and sheet.level else diff_name
     if sheet is not None and sheet.internal_level_value is not None:
         subtitle += f" ({sheet.internal_level_value})"
-    embed.description = subtitle
-
-    # Judgement-count/fast-late detail only renders when this track was
-    # explicitly picked from the dropdown (show_detail=True) - see
-    # RecentScoresView. In the grouped multi-embed listing every track's
-    # embed is built with show_detail=False regardless of whether its
-    # detail was successfully fetched, so the "unavailable" line below only
-    # ever appears for the one selected track.
-    lines = []
-    if show_detail:
-        if judgements is not None:
-            if text_mode == "lost_only":
-                loss = calculate_judgement_loss(judgements, score.achievement)
-                lines.append(f"```\n{_format_judgement_loss_table(judgements, loss)}\n```")
-            else:
-                lines.append(f"```\n{_format_judgement_table(judgements)}\n```")
-            if judgements.fast is not None or judgements.late is not None:
-                lines.append(f"FAST/LATE: **{_fmt(judgements.fast)}/{_fmt(judgements.late)}**")
-            if text_mode == "lost_only":
-                lines.append(f"LOST: **{loss.total_lost_percent:.2f}%**")
-        else:
-            lines.append("*Play detail unavailable for this track.*")
 
     dx_part = (
         f"{score.dx_score:,} / {score.dx_score_total:,}"
@@ -135,10 +83,25 @@ def _build_track_embed(
         else "-"
     )
     achievement_text = "No Chart" if score.achievement == 0 else f"{score.achievement:.4f}%"
-    lines.append(f"RANK: {badge_emojis.rank_badge(rank_tag)} - ACC: **{achievement_text}**")
-    lines.append(f"DXSCORE: **{dx_part}** - RATING: **{rating if rating is not None else '-'}**")
-    lines.append(f"Combo: {badge_emojis.combo_badge(score.combo_flag)}  Sync: {badge_emojis.sync_badge(score.sync_flag)}")
+    lines = [
+        f"RANK: {badge_emojis.rank_badge(rank_tag)} - ACC: **{achievement_text}**",
+        f"DXSCORE: **{dx_part}** - RATING: **{rating if rating is not None else '-'}**",
+        f"Combo: {badge_emojis.combo_badge(score.combo_flag)}  Sync: {badge_emojis.sync_badge(score.sync_flag)}",
+    ]
+    return subtitle, rank_tag, lines
 
+
+def _build_track_embed(score: RecentScore, jacket_index: int, has_jacket: bool) -> discord.Embed:
+    """Per-track overview embed - one per track in the current credit page
+    (3-4 embeds, well under Discord's 10-embeds-per-message cap). Never
+    shows judgement-count detail; that only renders as an image once a
+    track is picked from the dropdown (see RecentScoresView)."""
+    subtitle, rank_tag, lines = _score_summary(score)
+
+    embed = discord.Embed(title=score.title, color=embed_colors.rank_color(rank_tag))
+    if score.track_no is not None:
+        embed.set_author(name=f"TRACK {score.track_no:02d}")
+    embed.description = subtitle
     embed.add_field(name="Details:", value="\n".join(lines), inline=False)
 
     if score.played_at is not None:
@@ -148,24 +111,37 @@ def _build_track_embed(
     return embed
 
 
-def _track_result_heading(score: RecentScore) -> str:
-    """Message content shown alongside the rendered judgement-detail image
-    (RecentScoresView.on_track_selected, image_mode branch) - e.g.
-    'Titanium - MASTER [13.7] results'."""
-    catalog = get_catalog()
-    sheet = catalog.find_sheet(score.title, score.chart_type, score.difficulty)
-    diff_name = score.difficulty.display_name if score.difficulty else "?"
-    if sheet is not None and sheet.internal_level_value is not None:
-        return f"{score.title} - {diff_name} [{sheet.internal_level_value}] results"
-    return f"{score.title} - {diff_name} results"
+def _build_detail_embed(score: RecentScore, judgements: Judgements | None, has_jacket: bool) -> discord.Embed:
+    """Single-track detail embed - carries every piece of context
+    (TRACK NN, title, difficulty/constant, RANK/ACC, DXSCORE/RATING,
+    Combo/Sync, FAST/LATE, total LOST%) as plain embed text/thumbnail,
+    leaving the attached image (see renderers/judgement_detail.py) to show
+    ONLY the judgement table itself."""
+    subtitle, rank_tag, lines = _score_summary(score)
+    lines = list(lines)
+    if judgements is not None:
+        if judgements.fast is not None or judgements.late is not None:
+            lines.append(f"FAST/LATE: **{_fmt(judgements.fast)}/{_fmt(judgements.late)}**")
+        loss = calculate_judgement_loss(judgements, score.achievement)
+        lines.append(f"LOST: **{loss.total_lost_percent:.2f}%**")
+
+    embed = discord.Embed(title=score.title, color=embed_colors.rank_color(rank_tag))
+    if score.track_no is not None:
+        embed.set_author(name=f"TRACK {score.track_no:02d}")
+    embed.description = subtitle
+    embed.add_field(name="Details:", value="\n".join(lines), inline=False)
+    if has_jacket:
+        embed.set_thumbnail(url="attachment://jacket_detail.jpg")
+    embed.set_image(url="attachment://judgement_detail.png")
+    return embed
 
 
 async def _fetch_recent_with_details(client) -> tuple[list[RecentScore], dict[str, Judgements]]:
-    """Shared by /cc-recent and /cc-recent-detail: one get_recent_scores()
-    call, then eagerly fetch every track's judgment-count/DX-score detail up
-    front (rather than on-demand per click) - bounded only by the client's
-    own internal rate limiter (client.py's AsyncLimiter), same as any other
-    batch of calls through it."""
+    """One get_recent_scores() call, then eagerly fetch every track's
+    judgment-count/DX-score detail up front (rather than on-demand per
+    click) so a single-track focus never needs an extra fetch - bounded
+    only by the client's own internal rate limiter (client.py's
+    AsyncLimiter), same as any other batch of calls through it."""
     scores = await client.get_recent_scores()
     details_by_idx: dict[str, Judgements] = {}
 
@@ -183,11 +159,17 @@ async def _fetch_recent_with_details(client) -> tuple[list[RecentScore], dict[st
     return scores, details_by_idx
 
 
-async def _build_pages(scores: list[RecentScore]) -> list[list[tuple[RecentScore, discord.Embed, bytes | None]]]:
-    """Shared by /cc-recent and /cc-recent-detail: chunks scores into flat
-    25-track pages and builds each page's grouped (show_detail=False)
-    embeds with bulk-fetched jacket art - the browsing list looks identical
-    either way, only the single-track detail step differs by command."""
+async def _build_credit_pages(
+    scores: list[RecentScore],
+) -> tuple[list[list[tuple[RecentScore, discord.Embed, bytes | None]]], dict[str, bytes]]:
+    """Credit-grouped overview pages (3-4 tracks each, typically) with
+    bulk-fetched jacket art - drives the visible Previous/Next embeds, a
+    separate axis from the dropdown's flat 25-wide blocks (_chunk_scores).
+    Also returns a title->jacket-bytes lookup covering every fetched score,
+    since the dropdown can select a track from a different credit than the
+    one currently on screen - the single-track detail view (which also
+    wants a jacket thumbnail) can't rely on the currently-displayed credit
+    page's tuples for that."""
     catalog = get_catalog()
     image_name_by_title: dict[str, str] = {}
     for score in scores:
@@ -196,22 +178,30 @@ async def _build_pages(scores: list[RecentScore]) -> list[list[tuple[RecentScore
             image_name_by_title[score.title] = song.image_name
     jackets_by_image_name = await get_jackets_bulk(list(set(image_name_by_title.values())))
 
+    jacket_by_title: dict[str, bytes] = {}
+    for title, image_name in image_name_by_title.items():
+        jacket = jackets_by_image_name.get(image_name)
+        if jacket:
+            jacket_by_title[title] = jacket
+
     pages: list[list[tuple[RecentScore, discord.Embed, bytes | None]]] = []
-    for chunk in _chunk_scores(scores):
+    for credit_scores in _group_by_credit(scores):
         page: list[tuple[RecentScore, discord.Embed, bytes | None]] = []
-        for i, score in enumerate(chunk):
-            jacket = jackets_by_image_name.get(image_name_by_title.get(score.title))
-            embed = _build_track_embed(score, i, jacket is not None, None, show_detail=False)
+        for i, score in enumerate(credit_scores):
+            jacket = jacket_by_title.get(score.title)
+            embed = _build_track_embed(score, i, jacket is not None)
             page.append((score, embed, jacket))
         pages.append(page)
-    return pages
+    return pages, jacket_by_title
 
 
 class _TrackSelect(discord.ui.Select):
-    """Options are rebuilt from the parent view's current page every time
-    that page changes (see refresh_options) - Discord select options are
-    static once sent, they're not derived at render time like the embeds
-    are, so this has to be done explicitly on every page-toggle/Back click."""
+    """Options come from the owner's flat 25-wide dropdown_pages (NOT the
+    credit-grouped overview pages) - lets the user jump straight to any of
+    the current 25-block's tracks regardless of which credit page happens
+    to be on screen. Rebuilt only when dropdown_pages's current block
+    changes (the "Show X-Y" button), since Discord select options are
+    static once sent."""
 
     def __init__(self, owner: "RecentScoresView"):
         super().__init__(placeholder="View detailed stats for a track...", min_values=1, max_values=1, row=1)
@@ -219,10 +209,10 @@ class _TrackSelect(discord.ui.Select):
         self.refresh_options()
 
     def refresh_options(self):
-        page = self._owner.pages[self._owner.index]
-        base = self._owner.index * 25
+        block = self._owner.dropdown_pages[self._owner.dropdown_index]
+        base = self._owner.dropdown_index * 25
         options = []
-        for i, (score, _embed, _jacket) in enumerate(page):
+        for i, score in enumerate(block):
             diff_name = score.difficulty.display_name if score.difficulty else "?"
             options.append(
                 discord.SelectOption(
@@ -236,50 +226,58 @@ class _TrackSelect(discord.ui.Select):
 
 
 class RecentScoresView(discord.ui.View):
-    """Pages through recent plays flat, 25 at a time (Discord's own Select
-    option cap) - one message edit per toggle click, each page showing
-    every track on it as its own embed (Discord allows multiple embeds per
-    message via the `embeds=` param). Those grouped embeds never show
-    judgment-count/fast-late detail, even though it was fetched eagerly up
-    front for every track (see MaimaiNetClient.get_recent_score_detail) -
-    that detail only renders when a track is explicitly picked from the
-    dropdown below the buttons, which swaps the message to that single
-    track's detail alone (a text embed, or a rendered image when
-    image_mode is set - see on_track_selected).
+    """Two independent paging axes on one view:
 
-    `pages` is a list of 25-track blocks; each block is a list of
-    (RecentScore, Embed, jacket_bytes) tuples, where Embed was built with
-    show_detail=False. Jacket bytes (not discord.File objects) are stored
+    - `pages` (credit-grouped, via _group_by_credit): drives the VISIBLE
+      overview - Previous/Next walk between credits, each showing every
+      track in that credit as its own embed (3-4 embeds typically, well
+      under Discord's 10-embeds-per-message cap). Never shows judgement
+      detail.
+    - `dropdown_pages` (flat 25-wide blocks, via _chunk_scores): drives ONLY
+      the track-picker dropdown's options. The "Show X-Y" button flips
+      between these blocks WITHOUT touching whatever's currently on
+      screen - it lets the dropdown offer any of the last 25/50/... plays
+      regardless of which credit is currently displayed.
+
+    Picking a track from the dropdown (from whichever 25-block is active)
+    swaps the message to that single track's rendered judgement-detail
+    image, with a toggle button to show/hide the lost-achievement%
+    breakdown on it. `Back` (and Previous/Next, which also exit detail view
+    directly) return to the credit-grouped overview.
+
+    Jacket bytes (not discord.File objects) are stored on the credit pages
     and turned into fresh discord.File instances on every render, since a
-    File's stream is exhausted once sent and can't be resent (e.g. paging
-    back to an already-visited page, or back out of a detail view)."""
+    File's stream is exhausted once sent and can't be resent."""
 
     def __init__(
         self,
         invoker_id: int,
         pages: list[list[tuple[RecentScore, discord.Embed, bytes | None]]],
+        dropdown_pages: list[list[RecentScore]],
         details_by_idx: dict[str, Judgements],
-        image_mode: bool = False,
+        jacket_by_title: dict[str, bytes],
     ):
         super().__init__(timeout=30)
         self.invoker_id = invoker_id
         self.pages = pages
+        self.dropdown_pages = dropdown_pages
         self.details_by_idx = details_by_idx
-        self.image_mode = image_mode
-        self.index = 0
+        self.jacket_by_title = jacket_by_title
+        self.credit_index = 0
+        self.dropdown_index = 0
         self.viewing_detail = False
-        self.current_track_index: int | None = None
-        self.detail_mode: str = "summary" if image_mode else "counts"
+        self.selected_score: RecentScore | None = None
+        self.detail_mode: str = "summary"
         self.message: discord.InteractionMessage | None = None
         self.select = _TrackSelect(self)
         self.add_item(self.select)
         # A decorator-based (@discord.ui.button) item is always auto-added
-        # by View.__init__, so a toggle that should only appear when there's
-        # actually a second page has to be a plain Button built and added
-        # here instead - the common case (<=25 recent plays) then shows just
-        # the dropdown and Back, no dead disabled button.
+        # by View.__init__, so a toggle that should only appear when the
+        # dropdown actually has a second 25-block has to be a plain Button
+        # built and added here instead - the common case (<=25 recent
+        # plays) then shows no dead disabled button.
         self.page_toggle: discord.ui.Button | None = None
-        if len(self.pages) > 1:
+        if len(self.dropdown_pages) > 1:
             self.page_toggle = discord.ui.Button(style=discord.ButtonStyle.secondary, row=0)
             self.page_toggle.callback = self._on_page_toggle
             self._update_toggle_label()
@@ -287,38 +285,38 @@ class RecentScoresView(discord.ui.View):
         self._update_buttons()
 
     def _update_buttons(self):
+        self.previous.disabled = self.credit_index == 0
+        self.next.disabled = self.credit_index == len(self.pages) - 1
         self.back.disabled = not self.viewing_detail
         self.detail_toggle.disabled = not self.viewing_detail
         self._update_detail_toggle_label()
 
-    def _next_detail_mode(self) -> str:
-        if self.image_mode:
-            return "full" if self.detail_mode == "summary" else "summary"
-        return "lost_only" if self.detail_mode == "counts" else "counts"
-
     def _update_detail_toggle_label(self):
-        if self.image_mode:
-            self.detail_toggle.label = "Show Summary" if self.detail_mode == "full" else "Show Full Breakdown"
-        else:
-            self.detail_toggle.label = "Show Counts" if self.detail_mode == "lost_only" else "Show Lost %"
+        self.detail_toggle.label = "Hide Lost %" if self.detail_mode == "full" else "Show Lost %"
 
     def _update_toggle_label(self):
-        next_index = (self.index + 1) % len(self.pages)
+        next_index = (self.dropdown_index + 1) % len(self.dropdown_pages)
         starts = [0]
-        for page in self.pages[:-1]:
-            starts.append(starts[-1] + len(page))
+        for block in self.dropdown_pages[:-1]:
+            starts.append(starts[-1] + len(block))
         start = starts[next_index] + 1
-        end = starts[next_index] + len(self.pages[next_index])
+        end = starts[next_index] + len(self.dropdown_pages[next_index])
         self.page_toggle.label = f"Show {start}-{end}"
 
     async def _on_page_toggle(self, interaction: discord.Interaction):
-        self.index = (self.index + 1) % len(self.pages)
+        # Only changes which 25-block the dropdown offers - whatever's
+        # currently on screen (overview or a track's detail) is unaffected.
+        self.dropdown_index = (self.dropdown_index + 1) % len(self.dropdown_pages)
         self._update_toggle_label()
-        await self._render_page(interaction)
+        self.select.refresh_options()
+        if self.viewing_detail:
+            await self._render_current_detail(interaction)
+        else:
+            await self._render_page(interaction)
 
     def current_embeds_and_files(self) -> tuple[list[discord.Embed], list[discord.File]]:
         embeds, files = [], []
-        for i, (_score, embed, jacket) in enumerate(self.pages[self.index]):
+        for i, (_score, embed, jacket) in enumerate(self.pages[self.credit_index]):
             embeds.append(embed)
             if jacket:
                 files.append(discord.File(io.BytesIO(jacket), filename=f"jacket_{i}.jpg"))
@@ -326,42 +324,40 @@ class RecentScoresView(discord.ui.View):
 
     async def _render_page(self, interaction: discord.Interaction):
         self.viewing_detail = False
-        self.current_track_index = None
-        self.select.refresh_options()
+        self.selected_score = None
         self._update_buttons()
         embeds, files = self.current_embeds_and_files()
         await interaction.response.edit_message(content=None, embeds=embeds, view=self, attachments=files)
 
-    async def on_track_selected(self, interaction: discord.Interaction, page_local_index: int):
-        self.current_track_index = page_local_index
+    async def on_track_selected(self, interaction: discord.Interaction, block_local_index: int):
+        self.selected_score = self.dropdown_pages[self.dropdown_index][block_local_index]
         self.viewing_detail = True
         self._update_buttons()
         await self._render_current_detail(interaction)
 
     async def _render_current_detail(self, interaction: discord.Interaction):
-        """Renders self.current_track_index using self.detail_mode/
-        self.image_mode - shared by on_track_selected (first pick) and
-        detail_toggle (cycling mode on an already-selected track), so
-        toggling re-renders from already-fetched data with no re-fetch and
-        no dropdown interaction. Only reachable while viewing_detail is True
-        (detail_toggle is disabled otherwise), so current_track_index is
-        always set here."""
-        score, _embed, jacket = self.pages[self.index][self.current_track_index]
+        """Renders self.selected_score's judgement-detail image using
+        self.detail_mode - shared by on_track_selected (first pick),
+        detail_toggle (cycling the lost-% mode), and _on_page_toggle
+        (dropdown-block switch while already viewing a track), so none of
+        these re-fetch data. Only reachable while viewing_detail is True
+        (detail_toggle is disabled otherwise, and _on_page_toggle checks
+        it), so selected_score is always set here."""
+        score = self.selected_score
         judgements = self.details_by_idx.get(score.idx) if score.idx else None
-        if self.image_mode:
-            buf = io.BytesIO()
-            await asyncio.to_thread(
-                render_judgement_detail, score=score, judgements=judgements, mode=self.detail_mode, output=buf
-            )
-            file = discord.File(buf, filename="judgement_detail.png")
-            content = _track_result_heading(score)
-            await interaction.response.edit_message(content=content, embeds=[], view=self, attachments=[file])
-        else:
-            embed = _build_track_embed(
-                score, 0, jacket is not None, judgements, show_detail=True, text_mode=self.detail_mode
-            )
-            files = [discord.File(io.BytesIO(jacket), filename="jacket_0.jpg")] if jacket else []
-            await interaction.response.edit_message(content=None, embeds=[embed], view=self, attachments=files)
+        jacket = self.jacket_by_title.get(score.title)
+
+        buf = io.BytesIO()
+        await asyncio.to_thread(
+            render_judgement_detail, judgements=judgements, achievement=score.achievement, mode=self.detail_mode,
+            output=buf,
+        )
+        files = [discord.File(buf, filename="judgement_detail.png")]
+        if jacket:
+            files.append(discord.File(io.BytesIO(jacket), filename="jacket_detail.jpg"))
+
+        embed = _build_detail_embed(score, judgements, jacket is not None)
+        await interaction.response.edit_message(content=None, embeds=[embed], view=self, attachments=files)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.invoker_id:
@@ -371,13 +367,23 @@ class RecentScoresView(discord.ui.View):
             return False
         return True
 
+    @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary, row=0)
+    async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.credit_index -= 1
+        await self._render_page(interaction)
+
+    @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary, row=0)
+    async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.credit_index += 1
+        await self._render_page(interaction)
+
     @discord.ui.button(label="Back", style=discord.ButtonStyle.secondary, row=0)
     async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self._render_page(interaction)
 
-    @discord.ui.button(label="Show Full Breakdown", style=discord.ButtonStyle.secondary, row=0)
+    @discord.ui.button(label="Show Lost %", style=discord.ButtonStyle.secondary, row=0)
     async def detail_toggle(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.detail_mode = self._next_detail_mode()
+        self.detail_mode = "summary" if self.detail_mode == "full" else "full"
         self._update_detail_toggle_label()
         await self._render_current_detail(interaction)
 
@@ -407,7 +413,15 @@ class RecordsCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    async def _recent_impl(self, interaction: discord.Interaction, image_mode: bool):
+    @app_commands.command(name="cc-recent", description="View your recent maimai DX plays")
+    @app_commands.allowed_installs(guilds=True, users=True)
+    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+    async def recent(self, interaction: discord.Interaction):
+        if not await access.handle_command_access(interaction, interaction.user.id, "cc-recent", access.MAIMAI_NET_COOLDOWN):
+            return
+        await interaction.response.defer()
+        await interaction.edit_original_response(content="Getting data...")
+
         try:
             # with_client() transparently retries once via a silent re-login
             # if the session had expired and the user opted into
@@ -420,9 +434,10 @@ class RecordsCog(commands.Cog):
                 await interaction.edit_original_response(content="No recent plays found.")
                 return
 
-            pages = await _build_pages(scores)
+            pages, jacket_by_title = await _build_credit_pages(scores)
+            dropdown_pages = _chunk_scores(scores)
 
-            view = RecentScoresView(interaction.user.id, pages, details_by_idx, image_mode=image_mode)
+            view = RecentScoresView(interaction.user.id, pages, dropdown_pages, details_by_idx, jacket_by_title)
             embeds, files = view.current_embeds_and_files()
 
             message = await interaction.edit_original_response(content=None, embeds=embeds, view=view, attachments=files)
@@ -441,31 +456,6 @@ class RecordsCog(commands.Cog):
             await interaction.edit_original_response(
                 content=f"Couldn't fetch recent plays: unexpected error ({type(e).__name__}: {e})"
             )
-
-    @app_commands.command(name="cc-recent", description="View your recent maimai DX plays")
-    @app_commands.allowed_installs(guilds=True, users=True)
-    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-    async def recent(self, interaction: discord.Interaction):
-        if not await access.handle_command_access(interaction, interaction.user.id, "cc-recent", access.MAIMAI_NET_COOLDOWN):
-            return
-        await interaction.response.defer()
-        await interaction.edit_original_response(content="Getting data...")
-        await self._recent_impl(interaction, image_mode=False)
-
-    @app_commands.command(
-        name="cc-recent-detail",
-        description="Browse your recent maimai DX plays and render one as a detailed judgement-stats image",
-    )
-    @app_commands.allowed_installs(guilds=True, users=True)
-    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-    async def recent_detail(self, interaction: discord.Interaction):
-        if not await access.handle_command_access(
-            interaction, interaction.user.id, "cc-recent-detail", access.MAIMAI_NET_COOLDOWN
-        ):
-            return
-        await interaction.response.defer()
-        await interaction.edit_original_response(content="Getting data...")
-        await self._recent_impl(interaction, image_mode=True)
 
     @app_commands.command(name="cc-best", description="Render your best-50 maimai DX rating image (B15 + B35, like dxrating.net)")
     @app_commands.describe(

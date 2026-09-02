@@ -1,21 +1,16 @@
 from PIL import Image, ImageDraw, ImageFont
 
 from circlechiffon.ratingcalc.judgement_loss import JudgementLoss, LossValue, calculate_judgement_loss
-from circlechiffon.renderers.b50 import _DIFFICULTY_COLOR, FONT_DIR, _draw_guide_box, _fit_font, _hex_to_rgb, _truncate_to_width
-from circlechiffon.types import Judgements, NoteTypeJudgement, RecentScore
+from circlechiffon.renderers.b50 import FONT_DIR, _draw_guide_box, _hex_to_rgb
+from circlechiffon.types import Judgements, NoteTypeJudgement
 
-_JP_BOLD = str(FONT_DIR / "NotoSansJP-Bold.ttf")
-_JP_REGULAR = str(FONT_DIR / "NotoSansJP-Regular.ttf")
 _INTER_BOLD = str(FONT_DIR / "Inter_28pt-Bold.ttf")
 _INTER_REGULAR = str(FONT_DIR / "Inter_28pt-Regular.ttf")
 
-FONT_TITLE = ImageFont.truetype(_JP_BOLD, 26)
-FONT_SUBTITLE = ImageFont.truetype(_JP_REGULAR, 16)
 FONT_TABLE_HEADER = ImageFont.truetype(_INTER_BOLD, 16)
 FONT_ROW_LABEL = ImageFont.truetype(_INTER_BOLD, 15)
 FONT_CELL = ImageFont.truetype(_INTER_REGULAR, 16)
 FONT_SUBTEXT = ImageFont.truetype(_INTER_REGULAR, 11)
-FONT_FAST_LATE = ImageFont.truetype(_INTER_BOLD, 16)
 FONT_PLACEHOLDER = ImageFont.truetype(_INTER_REGULAR, 15)
 
 BACKGROUND_COLOR = (24, 24, 32)
@@ -31,15 +26,13 @@ _ROW_LABEL_COLOR = "#7C9CFF"  # navy-ish blue, fixed - distinct from the difficu
 
 CANVAS_W = 640
 _MARGIN_X = 24
-_HEADER_Y = 24
-_SUBTITLE_Y = 58
-_TABLE_Y0 = 96
+_TABLE_Y0 = 24
 _TABLE_H = 220  # fixed height used only for the "no judgement data" placeholder panel
 _ROW_LABEL_W = 100
 _HEADER_ROW_H = 40
 _ROW_H_SUMMARY = 36
 _ROW_H_FULL = 56
-_FOOTER_H = 70  # room below the table for FAST/LATE + LOST lines
+_BOTTOM_MARGIN = 24
 
 _ROWS: list[tuple[str, str]] = [
     ("TAP", "tap"),
@@ -154,54 +147,34 @@ def _draw_table(
     return y
 
 
-def render_judgement_detail(
-    *, score: RecentScore, judgements: Judgements | None, mode: str = "summary", output
-) -> None:
-    """Table-only judgement-breakdown image for a single recent play - one
-    row per note type (tap/hold/slide/touch/break), one column per
-    judgement tier, mirroring cogs/records.py's `_format_judgement_table`
-    text version but as a Pillow grid. Called via asyncio.to_thread from
-    RecentScoresView's image_mode branch.
+def render_judgement_detail(*, judgements: Judgements | None, achievement: float, mode: str = "summary", output) -> None:
+    """The judgement table ONLY - one row per note type (tap/hold/slide/
+    touch/break), one column per judgement tier. Nothing else (no title,
+    difficulty, FAST/LATE, or a total LOST% line) - all of that is shown as
+    plain embed text/thumbnail alongside this image instead (see
+    cogs/records.py's RecentScoresView._render_current_detail /
+    _build_detail_embed). Called via asyncio.to_thread.
 
-    mode="summary" (default): today's note-count table, plus one LOST%
-    total line below FAST/LATE. mode="full": same table, but every scored
-    cell (Great/Good/Miss, and BREAK's Perfect/Great/Good/Miss) gets a
-    small loss% annotation underneath its count, and every row label gets
-    a "-loss% (row total%)" line underneath it - ported from
-    ratingcalc/judgement_loss.py's achievement-loss math. Canvas height is
-    computed per-call since "full" mode's taller rows don't fit the
-    "summary" layout's fixed size."""
+    mode="summary" (default): plain note-count table. mode="full": same
+    table, but every scored cell (Great/Good/Miss, and BREAK's Perfect/
+    Great/Good/Miss) gets a small loss% annotation underneath its count,
+    and every row label gets a "-loss% (row total%)" line underneath it -
+    ported from ratingcalc/judgement_loss.py's achievement-loss math (still
+    part of "the table" - these annotations live inside its cells/rows,
+    unlike the removed total line). Canvas height is computed per-call
+    since "full" mode's taller rows don't fit the "summary" layout's fixed
+    size."""
     rows = _present_rows(judgements) if judgements is not None else []
     full = mode == "full"
     row_h = _ROW_H_FULL if full else _ROW_H_SUMMARY
     table_h = (_HEADER_ROW_H + row_h * len(rows)) if judgements is not None else _TABLE_H
-    canvas_h = _TABLE_Y0 + table_h + _FOOTER_H
+    canvas_h = _TABLE_Y0 + table_h + _BOTTOM_MARGIN
 
     image = Image.new("RGB", (CANVAS_W, canvas_h), BACKGROUND_COLOR)
     draw = ImageDraw.Draw(image)
 
-    title_font = _fit_font(draw, score.title, _JP_BOLD, CANVAS_W - _MARGIN_X * 2, 30)
-    title_text = _truncate_to_width(draw, score.title, title_font, CANVAS_W - _MARGIN_X * 2)
-    draw.text((_MARGIN_X, _HEADER_Y), title_text, font=title_font, fill=_TEXT_COLOR)
-
-    diff_name = score.difficulty.display_name if score.difficulty else "?"
-    accent = _hex_to_rgb(_DIFFICULTY_COLOR.get(score.difficulty, "#9e45e2"))
-    draw.text((_MARGIN_X, _SUBTITLE_Y), diff_name, font=FONT_SUBTITLE, fill=accent)
-
-    loss = calculate_judgement_loss(judgements, score.achievement) if judgements is not None else None
-    table_bottom = _draw_table(image, draw, judgements, mode, loss)
-
-    footer_y = table_bottom + 24
-    if judgements is not None and (judgements.fast is not None or judgements.late is not None):
-        draw.text(
-            (_MARGIN_X, footer_y),
-            f"FAST: {_fmt(judgements.fast)}   LATE: {_fmt(judgements.late)}",
-            font=FONT_FAST_LATE,
-            fill=_TEXT_COLOR,
-        )
-        footer_y += 24
-    if loss is not None:
-        draw.text((_MARGIN_X, footer_y), f"LOST: {loss.total_lost_percent:.2f}%", font=FONT_FAST_LATE, fill=_TEXT_COLOR)
+    loss = calculate_judgement_loss(judgements, achievement) if judgements is not None else None
+    _draw_table(image, draw, judgements, mode, loss)
 
     image.save(output, "PNG", compress_level=3)
     output.seek(0)
@@ -212,17 +185,9 @@ def render_judgement_detail_template(output) -> None:
     illustrates the default "summary" mode only (templates document one
     canonical shape, same convention as every other renderer's template).
     See generate_templates.py."""
-    canvas_h = _TABLE_Y0 + _TABLE_H + _FOOTER_H
+    canvas_h = _TABLE_Y0 + _TABLE_H + _BOTTOM_MARGIN
     image = Image.new("RGBA", (CANVAS_W, canvas_h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
-    _draw_guide_box(draw, (_MARGIN_X, _HEADER_Y, CANVAS_W - _MARGIN_X, _HEADER_Y + 30), "title")
-    _draw_guide_box(draw, (_MARGIN_X, _SUBTITLE_Y, CANVAS_W - _MARGIN_X, _SUBTITLE_Y + 20), "difficulty")
     _draw_guide_box(draw, (_MARGIN_X, _TABLE_Y0, CANVAS_W - _MARGIN_X, _TABLE_Y0 + _TABLE_H), "judgement table")
-    _draw_guide_box(
-        draw, (_MARGIN_X, _TABLE_Y0 + _TABLE_H + 12, CANVAS_W - _MARGIN_X, _TABLE_Y0 + _TABLE_H + 36), "fast/late"
-    )
-    _draw_guide_box(
-        draw, (_MARGIN_X, _TABLE_Y0 + _TABLE_H + 36, CANVAS_W - _MARGIN_X, _TABLE_Y0 + _TABLE_H + 60), "lost %"
-    )
     image.save(output, "PNG", compress_level=3)
     output.seek(0)
