@@ -28,11 +28,14 @@ def S(value: int | float) -> int:
     return round(value * SCALE)
 
 
-FONT_TITLE = ImageFont.truetype(_JP_BOLD, S(15))
-FONT_SUBTEXT = ImageFont.truetype(_JP_REGULAR, S(13))
-FONT_RATING = ImageFont.truetype(_JP_MEDIUM, S(14))
-FONT_RATING_VALUE = ImageFont.truetype(_INTER_BOLD, S(20))
-FONT_RANK_BADGE = ImageFont.truetype(_INTER_REGULAR, S(12))
+FONT_TITLE = ImageFont.truetype(_JP_BOLD, S(24))
+FONT_SUBTEXT = ImageFont.truetype(_JP_REGULAR, S(16))
+FONT_RATING = ImageFont.truetype(_JP_MEDIUM, S(20))
+FONT_RATING_VALUE = ImageFont.truetype(_INTER_BOLD, S(32))
+FONT_RANK_BADGE = ImageFont.truetype(_INTER_REGULAR, S(14))
+FONT_TAG = ImageFont.truetype(_INTER_BOLD, S(13))  # chart-type pill (DX/STD), card header
+FONT_LEVEL_BADGE = ImageFont.truetype(_INTER_BOLD, S(18))  # internal-level box, card header
+FONT_RANK_TEXT = ImageFont.truetype(_INTER_BOLD, S(34))  # big letter-grade (SS+, AAA, ...) per card
 FONT_HEADER_NAME = ImageFont.truetype(_JP_BOLD, S(34))
 FONT_HEADER_STAT_VALUE = ImageFont.truetype(_INTER_BOLD, S(30))
 FONT_HEADER_STAT_LABEL = ImageFont.truetype(_INTER_REGULAR, S(14))
@@ -43,11 +46,11 @@ FONT_FOOTER = ImageFont.truetype(_INTER_REGULAR, S(13))
 # and 35 / 15 both factor into 5 rows (7 wide and 3 wide respectively), so
 # the grids line up top and bottom with no partial row in either.
 COL_WIDTH = S(300)
-ROW_HEIGHT = S(124)
+ROW_HEIGHT = S(215)
 CELL_PADDING = S(4)
 CARD_WIDTH = COL_WIDTH - CELL_PADDING * 2
 CARD_HEIGHT = ROW_HEIGHT - CELL_PADDING * 2
-JACKET_SIZE = S(84)
+JACKET_SIZE = S(90)
 
 B35_COLS, B35_ROWS = 7, 5  # 35 cells
 B15_COLS, B15_ROWS = 3, 5  # 15 cells
@@ -125,7 +128,22 @@ _DIFFICULTY_COLOR = {
     Difficulty.master: "#9e45e2",
 }
 _REMASTER_BG = "#EBCFFF"
-_REMASTER_FG = "#951BEF"
+
+# big letter-grade text color per rank tier (rank_tag_for_achievement's
+# lowercase keys) - gold for the S-and-above tiers real maimai treats as
+# "good", cooling off to grey for anything below.
+_RANK_TEXT_COLORS = {
+    "sssp": (255, 232, 150), "sss": (255, 219, 110),
+    "ssp": (255, 179, 71), "ss": (255, 161, 46),
+    "sp": (255, 221, 130), "s": (240, 200, 120),
+    "aaa": (225, 225, 232), "aa": (210, 210, 218), "a": (195, 195, 202),
+    "bbb": (170, 170, 178), "bb": (170, 170, 178), "b": (170, 170, 178),
+    "c": (150, 150, 158), "d": (140, 140, 148),
+}
+
+# chart-type header pill (DX/STD) - loosely matches the real maimai NET
+# card's red "でらっくす" (DX) pill vs. the plain "STANDARD" one.
+_TYPE_TAG_COLORS = {"dx": (219, 50, 88), "std": (50, 130, 219)}
 
 
 def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
@@ -140,15 +158,22 @@ def _shade(rgb: tuple[int, int, int], factor: float) -> tuple[int, int, int]:
 def _card_palette(difficulty: Difficulty | None) -> dict:
     if difficulty == Difficulty.remaster:
         bg = _hex_to_rgb(_REMASTER_BG)
-        return {"bg1": bg, "bg2": _shade(bg, 0.92), "fg": _hex_to_rgb(_REMASTER_FG), "sub_fg": _hex_to_rgb(_REMASTER_FG)}
+        # solid black rather than a difficulty-tint purple - the light
+        # lavender background makes any tinted text low-contrast, and a
+        # muted grey (not pure black) for the secondary difficulty-name line
+        # so it doesn't compete with the main title.
+        return {"bg1": bg, "bg2": _shade(bg, 0.92), "fg": (0, 0, 0), "sub_fg": (55, 55, 60)}
     base = _hex_to_rgb(_DIFFICULTY_COLOR.get(difficulty, "#666666"))
-    return {"bg1": base, "bg2": _shade(base, 0.72), "fg": (255, 255, 255), "sub_fg": (255, 255, 255, 210)}
+    return {"bg1": base, "bg2": _shade(base, 0.72), "fg": (255, 255, 255), "sub_fg": (225, 225, 230)}
 
 
-def _diagonal_gradient(size: tuple[int, int], color1: tuple[int, int, int], color2: tuple[int, int, int]) -> Image.Image:
+def _vertical_gradient(size: tuple[int, int], color1: tuple[int, int, int], color2: tuple[int, int, int]) -> Image.Image:
+    """Plain top-to-bottom gradient, color1 to color2. Previously rotated
+    45deg and resized to the card's (wide, non-square) size, which produced
+    a visible chevron/diamond artifact rather than a smooth diagonal - a
+    straight vertical gradient reads as a slight, solid-ish shade instead."""
     w, h = size
-    ramp = Image.linear_gradient("L").rotate(45, expand=True, resample=Image.BICUBIC)
-    ramp = ramp.resize((w, h))
+    ramp = Image.linear_gradient("L").resize((w, h))
     img1 = Image.new("RGB", size, color1)
     img2 = Image.new("RGB", size, color2)
     return Image.composite(img2, img1, ramp)
@@ -307,17 +332,49 @@ def _render_cell(
         return
 
     palette = _card_palette(entry.sheet.difficulty)
-    card = _diagonal_gradient((CARD_WIDTH, CARD_HEIGHT), palette["bg1"], palette["bg2"]).convert("RGBA")
+    card = _vertical_gradient((CARD_WIDTH, CARD_HEIGHT), palette["bg1"], palette["bg2"]).convert("RGBA")
     mask = _rounded_mask((CARD_WIDTH, CARD_HEIGHT), S(10))
     base.paste(card, card_pos, mask)
 
     draw = ImageDraw.Draw(base)
     fg = palette["fg"]
     text_x = card_pos[0] + S(8)
-    text_max_width = CARD_WIDTH - JACKET_SIZE - S(20)
+    right_x = card_pos[0] + CARD_WIDTH - S(8)
 
-    # jacket, top-right, falls back to a solid dark placeholder square
-    jacket_pos = (card_pos[0] + CARD_WIDTH - JACKET_SIZE - S(4), card_pos[1] + S(4))
+    # header row: chart-type pill top-left, internal-level badge top-right -
+    # mirrors the maimai NET score card's own header band.
+    type_name = entry.sheet.type.value.upper() if entry.sheet.type else "?"
+    tag_color = _TYPE_TAG_COLORS.get(entry.sheet.type.value if entry.sheet.type else "", (90, 90, 100))
+    tag_pad, tag_h = S(7), S(20)
+    tag_top = card_pos[1] + S(6)
+    tag_w = draw.textlength(type_name, font=FONT_TAG) + tag_pad * 2
+    draw.rounded_rectangle([(text_x, tag_top), (text_x + tag_w, tag_top + tag_h)], radius=S(10), fill=tag_color)
+    draw.text((text_x + tag_pad, tag_top + S(3)), type_name, font=FONT_TAG, fill=(255, 255, 255))
+
+    level_value = entry.sheet.internal_level_value
+    level_display = f"{level_value:.1f}" if level_value is not None else (entry.sheet.level or "?")
+    level_pad, level_h = S(9), S(26)
+    level_top = card_pos[1] + S(4)
+    level_w = draw.textlength(level_display, font=FONT_LEVEL_BADGE) + level_pad * 2
+    level_left = right_x - level_w
+    draw.rounded_rectangle(
+        [(level_left, level_top), (right_x, level_top + level_h)], radius=S(6), fill=_shade(palette["bg1"], 0.5)
+    )
+    draw.text((level_left + level_pad, level_top + S(4)), level_display, font=FONT_LEVEL_BADGE, fill=fg)
+
+    # title, full width, below the header row
+    title_top = card_pos[1] + S(34)
+    title_max_width = CARD_WIDTH - S(16)
+    title = _truncate_to_width(draw, entry.score.title, FONT_TITLE, title_max_width)
+    draw.text((text_x, title_top), title, font=FONT_TITLE, fill=fg)
+
+    divider_y = card_pos[1] + S(76)
+    draw.line([(text_x, divider_y), (right_x, divider_y)], fill=_shade(palette["bg1"], 1.3), width=S(2))
+
+    # body: jacket left, big letter-grade + achievement + difficulty name in
+    # the middle, combo/sync badges top-right, rating value bottom-right.
+    body_top = card_pos[1] + S(84)
+    jacket_pos = (text_x, body_top)
     if jacket_bytes:
         try:
             with Image.open(io.BytesIO(jacket_bytes)) as jacket:
@@ -331,47 +388,47 @@ def _render_cell(
         jmask = _rounded_mask((JACKET_SIZE, JACKET_SIZE), S(6))
         base.paste(placeholder, jacket_pos, jmask)
 
-    title = _truncate_to_width(draw, entry.score.title, FONT_TITLE, text_max_width)
-    draw.text((text_x, card_pos[1] + S(8)), title, font=FONT_TITLE, fill=fg)
+    mid_x = jacket_pos[0] + JACKET_SIZE + S(10)
 
-    diff_name = entry.sheet.difficulty.display_name if entry.sheet.difficulty else "?"
-    type_name = entry.sheet.type.value.upper() if entry.sheet.type else "?"
-    level_text = entry.sheet.level or ""
-    if entry.sheet.internal_level_value is not None:
-        level_text = f"{level_text} [{entry.sheet.internal_level_value:.1f}]"
-    subtext = _truncate_to_width(draw, f"{diff_name} [{type_name}] {level_text}", FONT_SUBTEXT, text_max_width)
+    rank_tag = rank_tag_for_achievement(entry.score.achievement)
+    rank_color = _RANK_TEXT_COLORS.get(rank_tag, (200, 200, 205))
+    draw.text((mid_x, body_top), entry.rank, font=FONT_RANK_TEXT, fill=rank_color, stroke_width=S(1), stroke_fill=(20, 20, 20))
+
+    # achievement rate - drawn in the same gold/yellow as the chart rating
+    # value so it stands out from the surrounding white card text instead of
+    # blending in as just another info line.
+    achievement_text = f"{entry.score.achievement:.4f}%"
     draw.text(
-        (text_x, card_pos[1] + S(28)),
-        subtext,
-        font=FONT_SUBTEXT,
-        fill=fg,
+        (mid_x, body_top + S(46)),
+        achievement_text,
+        font=FONT_RATING,
+        fill=RATING_ACCENT_COLOR,
+        stroke_width=S(1),
+        stroke_fill=(20, 20, 20),
     )
 
-    achievement_text = f"{entry.score.achievement:.4f}%"
-    draw.text((text_x, card_pos[1] + S(46)), achievement_text, font=FONT_RATING, fill=fg)
+    diff_name = entry.sheet.difficulty.display_name if entry.sheet.difficulty else "?"
+    draw.text((mid_x, body_top + S(74)), diff_name, font=FONT_SUBTEXT, fill=palette["sub_fg"])
 
-    # icon row - shifted a few px further from the achievement % line
-    # above it (was flush at +62, only ~2px clearance from that text)
-    icon_x = text_x
-    icon_y = card_pos[1] + S(66)
-    rank_tag = rank_tag_for_achievement(entry.score.achievement)
-    used = _paste_icon(base, badge_icons.get(f"rank:{rank_tag}"), (icon_x, icon_y), S(20))
-    icon_x += used + (S(4) if used else 0)
-    if entry.score.combo_flag is not None:
-        used = _paste_icon(base, badge_icons.get(f"combo:{entry.score.combo_flag.value}"), (icon_x, icon_y + S(2)), S(16))
-        icon_x += used + (S(4) if used else 0)
+    # combo/sync badges, top-right of the body, right-aligned and stacking
+    # leftward so either or both can be present without repositioning.
+    icon_size = S(30)
+    icon_right = right_x
     if entry.score.sync_flag is not None:
-        _paste_icon(base, badge_icons.get(f"sync:{entry.score.sync_flag.value}"), (icon_x, icon_y + S(2)), S(16))
+        _paste_icon(base, badge_icons.get(f"sync:{entry.score.sync_flag.value}"), (icon_right - icon_size, body_top), icon_size)
+        icon_right -= icon_size + S(6)
+    if entry.score.combo_flag is not None:
+        _paste_icon(base, badge_icons.get(f"combo:{entry.score.combo_flag.value}"), (icon_right - icon_size, body_top), icon_size)
 
-    # chart rating value - the card's actual contribution to the b50
-    # total. Bigger/bolder than the achievement % above it and drawn in
-    # the same gold used for the equipped rating badge elsewhere, with a
-    # thin dark stroke so it stays legible against every card's gradient
-    # (including the light remaster palette) - meant to stand out as the
-    # one number that matters most on each card, not blend in.
+    # chart rating value - the card's actual contribution to the b50 total,
+    # bottom-right, right-aligned. Bigger/bolder than the achievement %
+    # above it, with a thin dark stroke so it stays legible against every
+    # card's gradient (including the light remaster palette).
+    rating_text = f"{entry.rating}"
+    rating_w = draw.textlength(rating_text, font=FONT_RATING_VALUE)
     draw.text(
-        (text_x, card_pos[1] + S(90)),
-        f"{entry.rating}",
+        (right_x - rating_w, card_pos[1] + CARD_HEIGHT - S(42)),
+        rating_text,
         font=FONT_RATING_VALUE,
         fill=RATING_ACCENT_COLOR,
         stroke_width=S(1),
@@ -379,13 +436,7 @@ def _render_cell(
     )
 
     rank_badge = f"#{rank_in_section}"
-    badge_width = draw.textlength(rank_badge, font=FONT_RANK_BADGE)
-    draw.text(
-        (card_pos[0] + CARD_WIDTH - badge_width - S(6), card_pos[1] + CARD_HEIGHT - S(18)),
-        rank_badge,
-        font=FONT_RANK_BADGE,
-        fill=fg,
-    )
+    draw.text((text_x, card_pos[1] + CARD_HEIGHT - S(20)), rank_badge, font=FONT_RANK_BADGE, fill=fg)
 
 
 def _render_grid(
