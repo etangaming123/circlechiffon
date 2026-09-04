@@ -28,14 +28,12 @@ def S(value: int | float) -> int:
     return round(value * SCALE)
 
 
-FONT_TITLE = ImageFont.truetype(_JP_BOLD, S(24))
 FONT_SUBTEXT = ImageFont.truetype(_JP_REGULAR, S(16))
 FONT_RATING = ImageFont.truetype(_JP_MEDIUM, S(20))
 FONT_RATING_VALUE = ImageFont.truetype(_INTER_BOLD, S(32))
 FONT_RANK_BADGE = ImageFont.truetype(_INTER_REGULAR, S(14))
 FONT_TAG = ImageFont.truetype(_INTER_BOLD, S(13))  # chart-type pill (DX/STD), card header
 FONT_LEVEL_BADGE = ImageFont.truetype(_INTER_BOLD, S(18))  # internal-level box, card header
-FONT_RANK_TEXT = ImageFont.truetype(_INTER_BOLD, S(34))  # big letter-grade (SS+, AAA, ...) per card
 FONT_HEADER_NAME = ImageFont.truetype(_JP_BOLD, S(34))
 FONT_HEADER_STAT_VALUE = ImageFont.truetype(_INTER_BOLD, S(30))
 FONT_HEADER_STAT_LABEL = ImageFont.truetype(_INTER_REGULAR, S(14))
@@ -129,21 +127,24 @@ _DIFFICULTY_COLOR = {
 }
 _REMASTER_BG = "#EBCFFF"
 
-# big letter-grade text color per rank tier (rank_tag_for_achievement's
-# lowercase keys) - gold for the S-and-above tiers real maimai treats as
-# "good", cooling off to grey for anything below.
-_RANK_TEXT_COLORS = {
-    "sssp": (255, 232, 150), "sss": (255, 219, 110),
-    "ssp": (255, 179, 71), "ss": (255, 161, 46),
-    "sp": (255, 221, 130), "s": (240, 200, 120),
-    "aaa": (225, 225, 232), "aa": (210, 210, 218), "a": (195, 195, 202),
-    "bbb": (170, 170, 178), "bb": (170, 170, 178), "b": (170, 170, 178),
-    "c": (150, 150, 158), "d": (140, 140, 148),
-}
-
 # chart-type header pill (DX/STD) - loosely matches the real maimai NET
 # card's red "でらっくす" (DX) pill vs. the plain "STANDARD" one.
 _TYPE_TAG_COLORS = {"dx": (219, 50, 88), "std": (50, 130, 219)}
+
+_RANK_ICON_DIR = ASSETS_DIR / "badge_icons"
+_rank_icon_cache: dict[str, bytes | None] = {}
+
+
+def _load_rank_icon(rank_tag: str) -> bytes | None:
+    """rank_tag_for_achievement's lowercase tags ("ss", "sssp", ...) match
+    assets/badge_icons/rank_{tag}.png exactly. Cached in-process since the
+    same handful of files get re-read across every card in a render."""
+    if rank_tag not in _rank_icon_cache:
+        try:
+            _rank_icon_cache[rank_tag] = (_RANK_ICON_DIR / f"rank_{rank_tag}.png").read_bytes()
+        except OSError:
+            _rank_icon_cache[rank_tag] = None
+    return _rank_icon_cache[rank_tag]
 
 
 def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
@@ -362,11 +363,14 @@ def _render_cell(
     )
     draw.text((level_left + level_pad, level_top + S(4)), level_display, font=FONT_LEVEL_BADGE, fill=fg)
 
-    # title, full width, below the header row
+    # title, full width, below the header row. Sized to fit rather than
+    # truncated - _fit_font shrinks the font (down to its own 6px floor)
+    # until even a long title fits on one line, instead of ellipsis-cutting
+    # it at a fixed size.
     title_top = card_pos[1] + S(34)
     title_max_width = CARD_WIDTH - S(16)
-    title = _truncate_to_width(draw, entry.score.title, FONT_TITLE, title_max_width)
-    draw.text((text_x, title_top), title, font=FONT_TITLE, fill=fg)
+    title_font = _fit_font(draw, entry.score.title, _JP_BOLD, title_max_width, S(20))
+    draw.text((text_x, title_top), entry.score.title, font=title_font, fill=fg)
 
     divider_y = card_pos[1] + S(76)
     draw.line([(text_x, divider_y), (right_x, divider_y)], fill=_shade(palette["bg1"], 1.3), width=S(2))
@@ -391,21 +395,13 @@ def _render_cell(
     mid_x = jacket_pos[0] + JACKET_SIZE + S(10)
 
     rank_tag = rank_tag_for_achievement(entry.score.achievement)
-    rank_color = _RANK_TEXT_COLORS.get(rank_tag, (200, 200, 205))
-    draw.text((mid_x, body_top), entry.rank, font=FONT_RANK_TEXT, fill=rank_color, stroke_width=S(1), stroke_fill=(20, 20, 20))
+    _paste_icon(base, _load_rank_icon(rank_tag), (mid_x, body_top), S(38))
 
-    # achievement rate - drawn in the same gold/yellow as the chart rating
-    # value so it stands out from the surrounding white card text instead of
-    # blending in as just another info line.
+    # achievement rate, plain fg (white on normal cards, black on remaster's
+    # light background via the same palette-driven color the rest of the
+    # card's text uses) rather than a separate accent color.
     achievement_text = f"{entry.score.achievement:.4f}%"
-    draw.text(
-        (mid_x, body_top + S(46)),
-        achievement_text,
-        font=FONT_RATING,
-        fill=RATING_ACCENT_COLOR,
-        stroke_width=S(1),
-        stroke_fill=(20, 20, 20),
-    )
+    draw.text((mid_x, body_top + S(46)), achievement_text, font=FONT_RATING, fill=fg)
 
     diff_name = entry.sheet.difficulty.display_name if entry.sheet.difficulty else "?"
     draw.text((mid_x, body_top + S(74)), diff_name, font=FONT_SUBTEXT, fill=palette["sub_fg"])
