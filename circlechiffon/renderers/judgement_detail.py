@@ -1,7 +1,7 @@
 from PIL import Image, ImageDraw, ImageFont
 
 from circlechiffon.ratingcalc.judgement_loss import JudgementLoss, LossValue, calculate_judgement_loss
-from circlechiffon.renderers.b50 import FONT_DIR, _draw_guide_box, _hex_to_rgb
+from circlechiffon.renderers.b50 import FONT_DIR, _hex_to_rgb
 from circlechiffon.types import Judgements, NoteTypeJudgement
 
 _INTER_BOLD = str(FONT_DIR / "Inter_28pt-Bold.ttf")
@@ -176,18 +176,5 @@ def render_judgement_detail(*, judgements: Judgements | None, achievement: float
     loss = calculate_judgement_loss(judgements, achievement) if judgements is not None else None
     _draw_table(image, draw, judgements, mode, loss)
 
-    image.save(output, "PNG", compress_level=3)
-    output.seek(0)
-
-
-def render_judgement_detail_template(output) -> None:
-    """Transparent-background guide PNG for judgement_detail.py's layout -
-    illustrates the default "summary" mode only (templates document one
-    canonical shape, same convention as every other renderer's template).
-    See generate_templates.py."""
-    canvas_h = _TABLE_Y0 + _TABLE_H + _BOTTOM_MARGIN
-    image = Image.new("RGBA", (CANVAS_W, canvas_h), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(image)
-    _draw_guide_box(draw, (_MARGIN_X, _TABLE_Y0, CANVAS_W - _MARGIN_X, _TABLE_Y0 + _TABLE_H), "judgement table")
     image.save(output, "PNG", compress_level=3)
     output.seek(0)

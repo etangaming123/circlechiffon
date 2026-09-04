@@ -60,6 +60,13 @@ with anything you like — any size, it's resized to 1500x1300 — to reskin eve
 code changes. If the file is ever missing, rendering falls back to a plain solid background rather
 than failing.
 
+## `/cc-profile`'s editable template (core view only)
+
+`assets/profile_core/template.png` works the same way, for `/cc-profile`'s "core" stats view only —
+replace it to reskin that render, any size (resized to 640x961), falling back to a plain solid
+background if missing. `/cc-profile`'s "extras" view, `/cc-display`, and the judgement-detail embed
+are fixed-design and have no equivalent editable template.
+
 ## dxrating.net connectivity
 
 The dxrating.net tags API (`miruku.dxrating.net`) and jacket CDN (`shama.dxrating.net`) may be

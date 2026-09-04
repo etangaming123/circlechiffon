@@ -1,11 +1,12 @@
 """
-Generates guide-only PNGs for every image-generating renderer in
-circlechiffon/renderers/ - each one is a transparent-background image at
-the renderer's real output size, with labeled outline boxes marking every
-position the real render function draws content. Meant to be opened in an
-external image editor (Photoshop/GIMP/etc.) as a reference for designing a
-matching background/decoration around the real content, without needing a
-live account or guessing at layout coordinates.
+Generates guide-only PNGs for every renderer in circlechiffon/renderers/
+that supports a swappable decorative background - each one is a
+transparent-background image at the renderer's real output size, with
+labeled outline boxes marking every position the real render function
+draws content. Meant to be opened in an external image editor
+(Photoshop/GIMP/etc.) as a reference for designing a matching
+background/decoration around the real content, without needing a live
+account or guessing at layout coordinates.
 
 Usage:
     python3 generate_templates.py               # writes PNGs into ./templates/
@@ -17,9 +18,7 @@ import sys
 from pathlib import Path
 
 from circlechiffon.renderers.b50 import render_b50_template
-from circlechiffon.renderers.display import render_display_template
-from circlechiffon.renderers.judgement_detail import render_judgement_detail_template
-from circlechiffon.renderers.profile import render_profile_core_template, render_profile_extras_template
+from circlechiffon.renderers.profile import render_profile_core_template
 
 # anchored to this file's own directory rather than a bare relative name -
 # same reasoning as config.CONFIG_PATH/crypto_utils.KEY_FILE: a bare
@@ -31,10 +30,7 @@ TEMPLATES_DIR = str(_BASE_DIR / "templates")
 
 _GENERATORS = {
     "b50_template.png": render_b50_template,
-    "display_template.png": render_display_template,
     "profile_core_template.png": render_profile_core_template,
-    "profile_extras_template.png": render_profile_extras_template,
-    "judgement_detail_template.png": render_judgement_detail_template,
 }
 
 

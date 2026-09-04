@@ -7,7 +7,6 @@ from circlechiffon.renderers.b50 import (
     FONT_DIR,
     RATING_ACCENT_COLOR as RATING_TEXT_COLOR,
     _TIER_COLORS,
-    _draw_guide_box,
     _fit_font,
     _hex_to_rgb,
     _paste_rating_badge,
@@ -17,7 +16,6 @@ from circlechiffon.renderers.b50 import (
 from circlechiffon.types import Circle, Profile
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent.parent / "assets"
-FALLBACK_TEMPLATE_PATH = ASSETS_DIR / "b50" / "template.png"
 # traced off the reference card - the group glyph on the circle banner's
 # blue tab, which SEGA doesn't serve as a file anywhere.
 CHIP_ICON_PATH = ASSETS_DIR / "display" / "circle_chip_icon.png"
@@ -113,11 +111,7 @@ def _load_frame(frame_bytes: bytes | None, canvas_w: int, canvas_h: int) -> Imag
                 return _cover_fit(frame.convert("RGB"), canvas_w, canvas_h)
         except Exception:
             pass
-    try:
-        with Image.open(FALLBACK_TEMPLATE_PATH) as template:
-            return _cover_fit(template.convert("RGB"), canvas_w, canvas_h)
-    except (FileNotFoundError, OSError):
-        return Image.new("RGB", (canvas_w, canvas_h), BACKGROUND_COLOR)
+    return Image.new("RGB", (canvas_w, canvas_h), BACKGROUND_COLOR)
 
 
 def _fit_nameplate(nameplate_bytes: bytes | None, box_w: int, box_h: int) -> Image.Image:
@@ -577,53 +571,3 @@ def render_display(
     image.save(output, "PNG", compress_level=3)
     output.seek(0)
 
-
-def render_display_template(output) -> None:
-    """Synchronous, no live data needed. Renders a transparent-background
-    guide PNG at the exact /cc-display canvas size, with labeled outline
-    boxes at every position render_display() actually draws content -
-    meant to be opened in an external image editor to design a Frame
-    background around the real content instead of guessing at its layout."""
-    image = Image.new("RGBA", (CANVAS_W, CANVAS_H), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(image)
-
-    _draw_guide_box(draw, (NAMEPLATE_X, NAMEPLATE_Y, NAMEPLATE_X + NAMEPLATE_W, NAMEPLATE_Y + NAMEPLATE_H), "NAMEPLATE INSET")
-    _draw_guide_box(draw, (ICON_X, ICON_Y, ICON_X + ICON_SIZE, ICON_Y + ICON_SIZE), "ICON", color=(0, 200, 255))
-
-    content_w = CONTENT_RIGHT - CONTENT_X
-
-    row_a_y = NAMEPLATE_Y + ROW_A_Y
-    _draw_guide_box(draw, (CONTENT_X, row_a_y, CONTENT_X + 150, row_a_y + ROW_A_H), "RATING BADGE", color=(0, 200, 255))
-    _draw_guide_box(
-        draw,
-        (CONTENT_X + 150 + CLASS_GAP, row_a_y, CONTENT_X + 150 + CLASS_GAP + round(content_w * 0.22), row_a_y + round(ROW_A_H * 1.15)),
-        "CLASS BADGE",
-        color=(0, 200, 255),
-    )
-
-    row_b_y = NAMEPLATE_Y + ROW_B_Y
-    name_text_x = CONTENT_X + NAME_PAD_L
-    badge_x = name_text_x + NAME_TEXT_W + NAME_BADGE_GAP
-    _draw_guide_box(draw, (CONTENT_X, row_b_y, CONTENT_X + NAME_BOX_W, row_b_y + ROW_B_H), "NAME BOX")
-    _draw_guide_box(
-        draw,
-        (name_text_x, row_b_y, name_text_x + NAME_TEXT_W, row_b_y + ROW_B_H),
-        "PLAYER NAME",
-        color=(0, 200, 255),
-    )
-    _draw_guide_box(
-        draw,
-        (badge_x, row_b_y, badge_x + NAME_BADGE_W, row_b_y + ROW_B_H),
-        "DAN/COURSE RANK BADGE",
-        color=(0, 200, 255),
-    )
-
-    row_c_y = NAMEPLATE_Y + ROW_C_Y
-    _draw_guide_box(draw, (CONTENT_X, row_c_y, CONTENT_X + TITLE_W, row_c_y + ROW_C_H), "TITLE PLATE")
-
-    ribbon_x = CONTENT_X + RIBBON_X_OFFSET
-    ribbon_y = NAMEPLATE_Y + NAMEPLATE_H - RIBBON_Y_OVERLAP
-    _draw_guide_box(draw, (ribbon_x, ribbon_y, ribbon_x + RIBBON_W, ribbon_y + RIBBON_H), "CIRCLE BANNER")
-
-    image.save(output, "PNG", compress_level=3)
-    output.seek(0)
