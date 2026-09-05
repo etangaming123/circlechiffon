@@ -112,7 +112,34 @@ def _draw_guide_box(
         draw.text((x0 + S(3), y0 + S(1)), label, font=_GUIDE_LABEL_FONT, fill=color)
 
 
-def _load_base_image() -> Image.Image:
+def _cover_fit(image: Image.Image, target_w: int, target_h: int) -> Image.Image:
+    """Scales `image` to fully cover a target_w x target_h box (matching
+    whichever dimension needs more scale) and center-crops the overflow -
+    same idea as CSS `background-size: cover`. Preserves the source aspect
+    ratio, unlike a plain stretch-to-fit resize. Shared with display.py and
+    with a user's uploaded custom template, whose aspect ratio can't be
+    assumed to match the canvas."""
+    src_w, src_h = image.size
+    scale = max(target_w / src_w, target_h / src_h)
+    scaled_w, scaled_h = round(src_w * scale), round(src_h * scale)
+    resized = image.resize((scaled_w, scaled_h), Image.Resampling.LANCZOS)
+    left = (scaled_w - target_w) // 2
+    top = (scaled_h - target_h) // 2
+    return resized.crop((left, top, left + target_w, top + target_h))
+
+
+def _load_base_image(template_bytes: bytes | None = None) -> Image.Image:
+    """`template_bytes`, when given (a user's uploaded custom template),
+    takes priority over the repo-wide TEMPLATE_PATH default, cover-fit
+    rather than stretched since an arbitrary upload's aspect ratio can't be
+    assumed to match the canvas. Falls back to TEMPLATE_PATH, then flat
+    color, same as before this parameter existed."""
+    if template_bytes:
+        try:
+            with Image.open(io.BytesIO(template_bytes)) as template:
+                return _cover_fit(template.convert("RGB"), CANVAS_WIDTH, CANVAS_HEIGHT)
+        except Exception:
+            pass
     try:
         with Image.open(TEMPLATE_PATH) as template:
             return template.convert("RGB").resize((CANVAS_WIDTH, CANVAS_HEIGHT))
@@ -476,6 +503,7 @@ def render_b50(
     jackets_by_title: dict[str, bytes],
     badge_icons: dict[str, bytes] | None = None,
     version_logo_bytes: bytes | None = None,
+    template_bytes: bytes | None = None,
     output,
 ) -> None:
     """Synchronous - CPU-bound Pillow work. Call via asyncio.to_thread().
@@ -484,9 +512,12 @@ def render_b50(
     `icon_bytes`/`rating_badge_bytes` are optional too and degrade to a
     placeholder / plain text respectively, same as `/cc-display`.
     `version_logo_bytes` is the current game version's title logo (see
-    adapters/maimai_site/version_logo.py) - omitted entirely when None."""
+    adapters/maimai_site/version_logo.py) - omitted entirely when None.
+    `template_bytes` is a user's uploaded custom background (see
+    circlechiffon/user_templates.py) - takes priority over the repo-wide
+    TEMPLATE_PATH default when given."""
     badge_icons = badge_icons or {}
-    image = _load_base_image()
+    image = _load_base_image(template_bytes)
     draw = ImageDraw.Draw(image)
 
     # header: profile icon + player name + rating badge on the left,

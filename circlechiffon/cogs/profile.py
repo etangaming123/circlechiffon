@@ -6,7 +6,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from circlechiffon import access, accounts
+from circlechiffon import access, accounts, user_templates
 from circlechiffon.adapters.maimai_net.badge_icons import get_all_badge_icons
 from circlechiffon.adapters.maimai_net.errors import MaimaiNetError, SessionExpired
 from circlechiffon.adapters.maimai_net.parser import parse_profile, parse_profile_extras
@@ -105,6 +105,7 @@ class ProfileCog(commands.Cog):
             )
         else:
             _, profile, icon_bytes, course_rank_bytes, class_rank_bytes, rating_badge_bytes, badge_icons = result
+            template_bytes = await user_templates.load_template(interaction.user.id, "profile_core")
             await asyncio.to_thread(
                 render_profile_core,
                 profile=profile,
@@ -113,6 +114,7 @@ class ProfileCog(commands.Cog):
                 class_rank_bytes=class_rank_bytes,
                 rating_badge_bytes=rating_badge_bytes,
                 badge_icons=badge_icons,
+                template_bytes=template_bytes,
                 output=buf,
             )
 

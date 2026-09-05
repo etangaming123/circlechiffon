@@ -7,6 +7,7 @@ from circlechiffon.renderers.b50 import (
     FONT_DIR,
     RATING_ACCENT_COLOR as RATING_TEXT_COLOR,
     _TIER_COLORS,
+    _cover_fit,
     _draw_guide_box,
     _fit_font,
     _hex_to_rgb,
@@ -91,19 +92,6 @@ CHIP_GRADIENT = [
 BACKGROUND_COLOR = (24, 24, 32)
 
 CARD_BORDER_COLOR = (198, 148, 84)
-
-def _cover_fit(image: Image.Image, target_w: int, target_h: int) -> Image.Image:
-    """Scales `image` to fully cover a target_w x target_h box (matching
-    whichever dimension needs more scale) and center-crops the overflow -
-    same idea as CSS `background-size: cover`. Preserves the source aspect
-    ratio, unlike a plain stretch-to-fit resize."""
-    src_w, src_h = image.size
-    scale = max(target_w / src_w, target_h / src_h)
-    scaled_w, scaled_h = round(src_w * scale), round(src_h * scale)
-    resized = image.resize((scaled_w, scaled_h), Image.Resampling.LANCZOS)
-    left = (scaled_w - target_w) // 2
-    top = (scaled_h - target_h) // 2
-    return resized.crop((left, top, left + target_w, top + target_h))
 
 
 def _load_frame(frame_bytes: bytes | None, canvas_w: int, canvas_h: int) -> Image.Image:

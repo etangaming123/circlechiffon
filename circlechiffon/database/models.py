@@ -60,6 +60,31 @@ class BannedUser(Base):
     banned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
+class TemplateAccess(Base):
+    """Whitelist of Discord users allowed to upload custom b50/profile
+    render templates (see circlechiffon/user_templates.py). The owner
+    always has access implicitly (access.is_owner()), independent of
+    whether they have a row here."""
+
+    __tablename__ = "template_access"
+
+    discord_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    granted_by: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class UserTemplate(Base):
+    """One uploaded background template for one (user, render type) pair.
+    The image itself lives on disk at a path derived from these two key
+    columns (see user_templates.py) - no path column needed."""
+
+    __tablename__ = "user_templates"
+
+    discord_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    render_type: Mapped[str] = mapped_column(String(32), primary_key=True)
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
 class CollectionPreset(Base):
     """One saved set of equipped collection items (icon / name plate / frame /
     title) for a Discord user, in one of 5 numbered slots.

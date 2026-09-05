@@ -6,6 +6,7 @@ from circlechiffon.renderers.b50 import (
     FONT_DIR,
     RATING_ACCENT_COLOR,
     _TIER_COLORS,
+    _cover_fit,
     _draw_guide_box,
     _fit_font,
     _hex_to_rgb,
@@ -180,6 +181,21 @@ def _draw_count_pill(
     draw.text((x + w - 14 - text_w, y + (h - text_h) / 2 - bbox[1]), text, font=font, fill=_PILL_TEXT_COLOR)
 
 
+def _load_core_base_image(template_bytes: bytes | None) -> Image.Image:
+    """`template_bytes` is a user's uploaded custom background (see
+    circlechiffon/user_templates.py), cover-fit rather than stretched since
+    an arbitrary upload's aspect ratio can't be assumed to match the
+    canvas. Unlike b50.py there's no repo-wide default template file for
+    this renderer - falls straight back to the flat BACKGROUND_COLOR."""
+    if template_bytes:
+        try:
+            with Image.open(io.BytesIO(template_bytes)) as template:
+                return _cover_fit(template.convert("RGB"), CORE_CANVAS_WIDTH, CANVAS_HEIGHT_CORE)
+        except Exception:
+            pass
+    return Image.new("RGB", (CORE_CANVAS_WIDTH, CANVAS_HEIGHT_CORE), BACKGROUND_COLOR)
+
+
 def render_profile_core(
     *,
     profile: Profile,
@@ -188,15 +204,18 @@ def render_profile_core(
     class_rank_bytes: bytes | None,
     rating_badge_bytes: bytes | None,
     badge_icons: dict[str, bytes],
+    template_bytes: bytes | None = None,
     output,
 ) -> None:
     """Synchronous - CPU-bound Pillow work. Call via asyncio.to_thread().
     Matches the "core" stats shown on maimai DX NET's Player's Data page:
     name/title/rating/rank badges/star count/play counts, plus the full
     21-tier music clear-count grid. All image params are optional and
-    degrade gracefully to a placeholder / text-only fallback."""
+    degrade gracefully to a placeholder / text-only fallback.
+    `template_bytes` is a user's uploaded custom background (see
+    circlechiffon/user_templates.py)."""
     badge_icons = badge_icons or {}
-    image = Image.new("RGB", (CORE_CANVAS_WIDTH, CANVAS_HEIGHT_CORE), BACKGROUND_COLOR)
+    image = _load_core_base_image(template_bytes)
     draw = ImageDraw.Draw(image)
 
     pad = GRID_PAD
