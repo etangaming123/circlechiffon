@@ -353,24 +353,6 @@ class ScoreCog(commands.Cog):
         a dropdown that led here is cleared rather than left hanging."""
         whose = "your" if friend is None else f"**{friend.profile.display_name}**'s"
 
-        # a friend's scores are five separate pages, one per difficulty, so
-        # report them the way /cc-friend-best does rather than sitting on
-        # "Getting data..." for the whole fan-out.
-        on_progress = None
-        if friend is not None:
-            display_order = ["Re:MASTER", "MASTER", "EXPERT", "ADVANCED", "BASIC"]
-            done: set[str] = set()
-
-            async def report_progress(diff_label: str) -> None:
-                done.add(diff_label)
-                lines = [
-                    f"Fetching {label} Charts... ✅" if label in done else f"Fetching {label} Charts..."
-                    for label in display_order
-                ]
-                await interaction.edit_original_response(content="\n".join(lines), view=None)
-
-            on_progress = report_progress
-
         try:
             view = await build_score_view(
                 interaction.user.id,
@@ -378,7 +360,6 @@ class ScoreCog(commands.Cog):
                 chart_type=chart_type,
                 friend=friend,
                 on_retry=accounts.default_retry_notice(interaction),
-                on_progress=on_progress,
             )
             if view is None:
                 await interaction.edit_original_response(
