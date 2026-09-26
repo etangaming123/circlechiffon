@@ -18,6 +18,7 @@ from circlechiffon.adapters.maimai_net.errors import MaimaiNetError, SessionExpi
 from circlechiffon.ratingcalc.best50 import calculate_best50
 from circlechiffon.ratingcalc.calculator import rank_tag_for_achievement
 from circlechiffon.renderers.b50 import render_b50
+from circlechiffon.renderers.profile import render_friend_profile
 from circlechiffon.songdata.catalog import get_catalog
 from circlechiffon.types import Difficulty, FriendEntry, Score, Song
 
@@ -586,40 +587,49 @@ class FriendsCog(commands.Cog):
             )
 
     async def _send_friend_profile(self, interaction: discord.Interaction, entry: FriendEntry):
-        """Fetches the icon and edits `interaction`'s response with the
-        profile embed. Works from either the original slash-command
-        interaction (already deferred) or a FriendPickView select callback
-        (already responded to via edit_message) - both support
-        edit_original_response against the same underlying message."""
+        """Fetches the friend's card images and edits `interaction`'s
+        response with the rendered profile card. Works from either the
+        original slash-command interaction (already deferred) or a
+        FriendPickView select callback (already responded to via
+        edit_message) - both support edit_original_response against the
+        same underlying message."""
+        profile = entry.profile
 
         async def fetch(client):
-            return await client.get_image_bytes(entry.profile.icon_url) if entry.profile.icon_url else None
+            async def image_or_none(url):
+                return await client.get_image_bytes(url) if url else None
+
+            return await asyncio.gather(
+                image_or_none(profile.icon_url),
+                image_or_none(profile.course_rank_url),
+                image_or_none(profile.class_rank_url),
+                image_or_none(profile.rating_badge_url),
+                get_all_badge_icons(),
+            )
 
         try:
-            icon_bytes = await accounts.with_client(
+            icon_bytes, course_rank_bytes, class_rank_bytes, rating_badge_bytes, badge_icons = await accounts.with_client(
                 interaction.user.id, fetch, on_retry=accounts.default_retry_notice(interaction)
             )
 
-            profile = entry.profile
-            embed = discord.Embed(title=profile.display_name, color=embed_colors.INFO)
-            embed.add_field(name="Rating", value=str(profile.rating) if profile.rating is not None else "?", inline=True)
-            if profile.title:
-                title_value = f"{profile.title} ({profile.title_tier})" if profile.title_tier else profile.title
-                embed.add_field(name="Title", value=title_value, inline=True)
-            if profile.star_count is not None:
-                embed.add_field(name="Stars", value=f"×{profile.star_count:,}", inline=True)
-            if entry.comment:
-                embed.add_field(name="Comment", value=entry.comment, inline=False)
-            embed.set_footer(
-                text="Visible friend data is limited."
+            buf = io.BytesIO()
+            await asyncio.to_thread(
+                render_friend_profile,
+                profile=profile,
+                comment=entry.comment,
+                icon_bytes=icon_bytes,
+                course_rank_bytes=course_rank_bytes,
+                class_rank_bytes=class_rank_bytes,
+                rating_badge_bytes=rating_badge_bytes,
+                badge_icons=badge_icons,
+                output=buf,
             )
-
-            files = []
-            if icon_bytes:
-                files.append(discord.File(io.BytesIO(icon_bytes), filename="icon.png"))
-                embed.set_thumbnail(url="attachment://icon.png")
-
-            await interaction.edit_original_response(content=None, embed=embed, view=None, attachments=files)
+            await interaction.edit_original_response(
+                content="-# Visible friend data is limited.",
+                embed=None,
+                view=None,
+                attachments=[discord.File(buf, filename=f"friend-profile-{entry.idx}.png")],
+            )
         except accounts.NotLinked:
             await interaction.edit_original_response(
                 content="You haven't linked a maimai DX NET account yet. Run `/cc-login` first.", view=None
@@ -698,10 +708,15 @@ class FriendsCog(commands.Cog):
 
             scores = await client.get_friend_scores(entry.idx, on_progress=report_progress)
             icon_bytes = await client.get_image_bytes(entry.profile.icon_url) if entry.profile.icon_url else None
-            return scores, icon_bytes
+            rating_badge_bytes = (
+                await client.get_image_bytes(entry.profile.rating_badge_url)
+                if entry.profile.rating_badge_url
+                else None
+            )
+            return scores, icon_bytes, rating_badge_bytes
 
         try:
-            scores, icon_bytes = await accounts.with_client(
+            scores, icon_bytes, rating_badge_bytes = await accounts.with_client(
                 interaction.user.id, fetch, on_retry=accounts.default_retry_notice(interaction)
             )
 
@@ -745,7 +760,7 @@ class FriendsCog(commands.Cog):
                 player_name=entry.profile.display_name,
                 rating=result.total_rating,
                 icon_bytes=icon_bytes,
-                rating_badge_bytes=None,
+                rating_badge_bytes=rating_badge_bytes,
                 result=result,
                 b15_version_label=b15_version_label,
                 jackets_by_title=jackets_by_title,

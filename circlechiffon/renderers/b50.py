@@ -1,7 +1,7 @@
 import io
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from circlechiffon.ratingcalc.best50 import Best50Result, RatedEntry
 from circlechiffon.ratingcalc.calculator import rank_tag_for_achievement
@@ -75,6 +75,27 @@ TEMPLATE_PATH = ASSETS_DIR / "b50" / "template.png"
 # number" across both renderers instead of blending into the achievement
 # % text above it.
 RATING_ACCENT_COLOR = (255, 221, 51)
+_RATING_SLOTS = 5  # split-flap digit cells on the rating_base_*.png strip
+# rating_base_*.png (296x86) landmarks in source px, for the widened badge
+# /cc-display draws (see _paste_rating_badge's `width`). The opaque plate
+# is the alpha bbox; the logo and the digit strip are the two pieces of art
+# that must keep their aspect, and the plain background columns between
+# them are the only thing stretched.
+_BADGE_PLATE_BOX = (3, 6, 292, 79)
+_BADGE_LOGO_X = (15, 113)
+_BADGE_LOGO_INK_H = 43  # y 21..64
+_BADGE_LOGO_BOX = (12, 18, 116, 67)  # the ink plus a few px of background to feather
+_BADGE_STRIP_BOX = (122, 17, 282, 69)
+_BADGE_EDGE_W = 6  # the frame's own left/right border, kept at scale
+_BADGE_STRIP_RADIUS = 8
+# where the reference card (170x32) centres the logo and the strip, and
+# how tall it prints the strip - as fractions of the badge box.
+_WIDE_LOGO_CX = 39 / 170
+_WIDE_LOGO_CY = 16 / 32
+_WIDE_LOGO_H = 23.5 / 32  # ink height
+_WIDE_STRIP_CX = 120.5 / 170
+_WIDE_STRIP_CY = 15.5 / 32
+_WIDE_STRIP_H = 24 / 32
 
 _SECTION_OLD_COLOR = (140, 150, 210)  # B35 - older-version bests
 _SECTION_NEW_COLOR = (255, 176, 64)  # B15 - current-version bests, called out more
@@ -235,6 +256,76 @@ def _fit_font(draw: ImageDraw.ImageDraw, text: str, font_path: str, max_w: int, 
     return ImageFont.truetype(font_path, 6)
 
 
+def _wide_rating_badge(
+    src: Image.Image, width: int, height: int
+) -> tuple[Image.Image, tuple[float, float, float, float]]:
+    """Rebuilds a rating_base_*.png plate at `width` x `height` - far wider
+    than its own aspect - without flattening any of its art. Returns the
+    image and the digit strip's (x, y, w, h) inside it.
+
+    The plate is cut into columns: frame edge, background, logo,
+    background, strip, background, frame edge. Every column is scaled to
+    `height` uniformly, and the three background bands alone take up the
+    extra width, which puts the logo and the strip where the reference
+    card has them. The card also prints the strip a touch larger than the
+    plate's own scale would, so an aspect-true copy of it is laid over the
+    top at that size."""
+    k = src.width / 296
+    plate = src.crop(tuple(round(v * k) for v in _BADGE_PLATE_BOX))
+    s = height / plate.height
+    px0 = round(_BADGE_PLATE_BOX[0] * k)
+    edge = round(_BADGE_EDGE_W * k)
+    logo0, logo1 = (round(v * k) - px0 for v in _BADGE_LOGO_X)
+    strip0, strip1 = round(_BADGE_STRIP_BOX[0] * k) - px0, round(_BADGE_STRIP_BOX[2] * k) - px0
+
+    edge_w = max(1, round(edge * s))
+    logo_w = round((logo1 - logo0) * s)
+    logo_x = round(width * _WIDE_LOGO_CX - logo_w / 2)
+    stripcol_w = round((strip1 - strip0) * s)
+    stripcol_x = round(width * _WIDE_STRIP_CX - stripcol_w / 2)
+    src_cuts = [0, edge, logo0, logo1, strip0, strip1, plate.width - edge, plate.width]
+    dst_cuts = [0, edge_w, logo_x, logo_x + logo_w, stripcol_x, stripcol_x + stripcol_w, width - edge_w, width]
+    if any(b <= a for a, b in zip(dst_cuts, dst_cuts[1:])):
+        # too narrow for the layout - plain aspect-kept plate instead
+        pill = _scale_to_height(plate, height)
+        return pill, (
+            strip0 * pill.width / plate.width,
+            (round(_BADGE_STRIP_BOX[1] * k) - round(_BADGE_PLATE_BOX[1] * k)) * s,
+            (strip1 - strip0) * pill.width / plate.width,
+            (_BADGE_STRIP_BOX[3] - _BADGE_STRIP_BOX[1]) * k * s,
+        )
+
+    pill = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    for (s0, s1), (d0, d1) in zip(zip(src_cuts, src_cuts[1:]), zip(dst_cuts, dst_cuts[1:])):
+        piece = plate.crop((s0, 0, s1, plate.height)).resize((d1 - d0, height), Image.Resampling.LANCZOS)
+        pill.paste(piece, (d0, 0))
+
+    # the logo, likewise: aspect-true and card-sized, its background
+    # margin feathered into the stretched background underneath.
+    logo_src = src.crop(tuple(round(v * k) for v in _BADGE_LOGO_BOX))
+    ls = height * _WIDE_LOGO_H / (_BADGE_LOGO_INK_H * k)
+    logo = logo_src.resize((round(logo_src.width * ls), round(logo_src.height * ls)), Image.Resampling.LANCZOS)
+    feather = max(1, round(3 * k * ls))
+    logo_mask = Image.new("L", logo.size, 0)
+    ImageDraw.Draw(logo_mask).rectangle([(feather, feather), (logo.width - 1 - feather, logo.height - 1 - feather)], fill=255)
+    logo_mask = logo_mask.filter(ImageFilter.GaussianBlur(feather / 2))
+    pill.paste(
+        logo,
+        (round(width * _WIDE_LOGO_CX - logo.width / 2), round(height * _WIDE_LOGO_CY - logo.height / 2)),
+        logo_mask,
+    )
+
+    strip_src = src.crop(tuple(round(v * k) for v in _BADGE_STRIP_BOX))
+    strip_h = round(height * _WIDE_STRIP_H)
+    strip_w = round(strip_src.width * strip_h / strip_src.height)
+    strip = strip_src.resize((strip_w, strip_h), Image.Resampling.LANCZOS)
+    strip_x = round(width * _WIDE_STRIP_CX - strip_w / 2)
+    strip_y = round(height * _WIDE_STRIP_CY - strip_h / 2)
+    mask = _rounded_mask((strip_w, strip_h), max(1, round(_BADGE_STRIP_RADIUS * k * strip_h / strip_src.height)))
+    pill.paste(strip, (strip_x, strip_y), mask)
+    return pill, (strip_x, strip_y, strip_w, strip_h)
+
+
 def _paste_rating_badge(
     image: Image.Image,
     draw: ImageDraw.ImageDraw,
@@ -243,39 +334,88 @@ def _paste_rating_badge(
     pos: tuple[int, int],
     height: int,
     text_color: tuple[int, int, int],
+    width: int | None = None,
 ) -> int:
     """Pastes the account's equipped rating badge/frame image scaled to
-    `height`, then draws `rating_text` stretched to fill the badge's own
-    dark digit-strip sub-box - measured pixel ratios of the real
-    maimai-DX-NET-provided asset (x 122..281, y 17..67 of a 296x86 image),
-    applied as fractions of the *actual* pasted size so the number always
-    sits inside the strip regardless of scale. Originally written for
-    renderers/display.py's `/cc-display` card; hoisted here so b50's
-    header can draw the same rating-badge-with-number. Returns the pasted
-    badge width (0 if no badge image)."""
+    `height`, then draws `rating_text` into the badge's own dark digit
+    strip. Returns the pasted badge width (0 if no badge image).
+
+    The strip is five split-flap slots - measured off the real
+    rating_base_*.png assets (296x86): x 123..281, y 17..68, separators at
+    ~155/186/217/249, i.e. five equal cells. Every digit gets one cell,
+    right-aligned so a 4-digit rating leaves the first slot empty the way
+    the game does, and all digits share one font size so a narrow "1"
+    doesn't render bigger than its neighbours. Measured as fractions of
+    the *actual* pasted size, so it holds at any scale. Anything that
+    isn't 1-5 digits (e.g. "?") falls back to one centred run across the
+    whole strip.
+
+    With `width`, the badge's *opaque plate* fills exactly `width` x
+    `height` instead - /cc-display's reference card prints it much wider
+    than its native aspect. Nothing is squashed to get there: the logo and the digit strip keep their
+    aspect and only the plain background between them is stretched (see
+    _wide_rating_badge)."""
     x, y = pos
     badge_w = 0
+    num_box = (0.0, 0.0, 0.0, 0.0)  # digit strip x, y, w, h relative to pos
     if rating_badge_bytes:
         try:
             with Image.open(io.BytesIO(rating_badge_bytes)) as pill_src:
-                pill = _scale_to_height(pill_src.convert("RGBA"), height)
+                pill_src = pill_src.convert("RGBA")
+                if width is not None:
+                    pill, num_box = _wide_rating_badge(pill_src, width, height)
+                else:
+                    pill = _scale_to_height(pill_src, height)
+                    num_box = (
+                        pill.width * (123 / 296),
+                        height * (17 / 86),
+                        pill.width * (158 / 296),
+                        height * (51 / 86),
+                    )
                 image.paste(pill, (x, y), pill)
                 badge_w = pill.width
         except Exception:
             badge_w = 0
     if badge_w:
-        num_x = x + round(badge_w * (122 / 296))
-        num_y = y + round(height * (17 / 86))
-        num_w = round(badge_w * (159 / 296))
-        num_h = round(height * (50 / 86))
-        font = _fit_font(draw, rating_text, _INTER_BOLD, 10_000, num_h)
-        bbox = draw.textbbox((0, 0), rating_text, font=font)
-        text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
-        layer = Image.new("RGBA", (max(text_w, 1), max(text_h, 1)), (0, 0, 0, 0))
-        ImageDraw.Draw(layer).text((-bbox[0], -bbox[1]), rating_text, font=font, fill=text_color)
-        stretch_w = max(text_w, round(num_w * 0.95))
-        layer = layer.resize((stretch_w, text_h), Image.Resampling.LANCZOS)
-        image.paste(layer, (num_x + (num_w - stretch_w) // 2, num_y + (num_h - text_h) // 2), layer)
+        num_x, num_y, num_w, num_h = x + num_box[0], y + num_box[1], num_box[2], num_box[3]
+        if rating_text.isdigit() and len(rating_text) <= _RATING_SLOTS:
+            cell_w = num_w / _RATING_SLOTS
+            first_slot = _RATING_SLOTS - len(rating_text)
+            # sized by the digit's *ink*, not the font size - _fit_font caps
+            # the size at max_h, and a digit's ink is only ~3/4 of that.
+            max_ink_w, max_ink_h = cell_w * 0.8, num_h * 0.78
+            size = max(6, round(num_h * 1.4))
+            while size > 6:
+                font = ImageFont.truetype(_INTER_BOLD, size)
+                ink = draw.textbbox((0, 0), "0", font=font)
+                if ink[2] - ink[0] <= max_ink_w and ink[3] - ink[1] <= max_ink_h:
+                    break
+                size -= 1
+            font = ImageFont.truetype(_INTER_BOLD, size)
+            for i, ch in enumerate(rating_text):
+                ink = draw.textbbox((0, 0), ch, font=font)
+                cell_x = num_x + cell_w * (first_slot + i)
+                draw.text(
+                    (
+                        round(cell_x + (cell_w - (ink[2] - ink[0])) / 2 - ink[0]),
+                        round(num_y + (num_h - (ink[3] - ink[1])) / 2 - ink[1]),
+                    ),
+                    ch,
+                    font=font,
+                    fill=text_color,
+                )
+        else:
+            font = _fit_font(draw, rating_text, _INTER_BOLD, round(num_w * 0.9), round(num_h * 0.7))
+            bbox = draw.textbbox((0, 0), rating_text, font=font)
+            draw.text(
+                (
+                    round(num_x + (num_w - (bbox[2] - bbox[0])) / 2 - bbox[0]),
+                    round(num_y + (num_h - (bbox[3] - bbox[1])) / 2 - bbox[1]),
+                ),
+                rating_text,
+                font=font,
+                fill=text_color,
+            )
     return badge_w
 
 
