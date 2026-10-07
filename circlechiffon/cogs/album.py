@@ -36,13 +36,13 @@ def _photo_embed(photo: Photo, index: int, total: int, has_image: bool, hide_loc
 
 
 class AlbumView(discord.ui.View):
-    """Pages through the account's photo album ( < / > ), one photo per
+    """Browses the account's photo album through a dropdown, one photo per
     page - cloned from ScoreToggleView's shape (cogs/score.py), not the
-    heavier RecentScoresView, since this is a flat list with no
-    grouping/dropdown. All photo bytes are fetched once up front (there
-    are at most 10, confirmed live - the site itself keeps no more), so
-    paging never blocks on a network call and can't be stranded half
-    populated by a mid-session expiry.
+    heavier RecentScoresView, since this is a flat list with no grouping.
+    All photo bytes are fetched once up front (there are at most 10,
+    confirmed live - the site itself keeps no more, well under a Select's
+    25-option cap), so switching never blocks on a network call and can't
+    be stranded half populated by a mid-session expiry.
 
     `image_bytes[i]` is raw bytes, not a discord.File - a File's
     underlying stream is exhausted once sent, so revisiting an
@@ -59,12 +59,31 @@ class AlbumView(discord.ui.View):
         self.image_bytes = image_bytes
         self.hide_location = hide_location
         self.index = 0
+        self._lock = asyncio.Lock()
         self.message: discord.InteractionMessage | None = None
-        self._update_buttons()
+        self.picker.options = self._build_options()
 
-    def _update_buttons(self):
-        self.previous.disabled = self.index == 0
-        self.next.disabled = self.index == len(self.photos) - 1
+    def _build_options(self) -> list[discord.SelectOption]:
+        options = []
+        for i, photo in enumerate(self.photos):
+            type_name = photo.chart_type.value.upper() if photo.chart_type else None
+            diff_name = photo.difficulty.display_name if photo.difficulty else None
+            desc = [p for p in (type_name, diff_name) if p]
+            if photo.venue and not self.hide_location:
+                desc.append(photo.venue)
+            options.append(
+                discord.SelectOption(
+                    label=f"{i + 1}. {photo.title or 'Untitled'}"[:100],
+                    description=" · ".join(desc)[:100] or None,
+                    value=str(i),
+                    default=i == self.index,
+                )
+            )
+        return options
+
+    def _update_picker(self):
+        for opt in self.picker.options:
+            opt.default = opt.value == str(self.index)
 
     def embed_and_file(self) -> tuple[discord.Embed, discord.File | None]:
         raw = self.image_bytes[self.index]
@@ -86,19 +105,30 @@ class AlbumView(discord.ui.View):
             return False
         return True
 
-    @discord.ui.button(label="<", style=discord.ButtonStyle.secondary)
-    async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.index -= 1
-        self._update_buttons()
-        embed, file = self.embed_and_file()
-        await interaction.response.edit_message(embed=embed, view=self, attachments=[file] if file else [])
-
-    @discord.ui.button(label=">", style=discord.ButtonStyle.secondary)
-    async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.index += 1
-        self._update_buttons()
-        embed, file = self.embed_and_file()
-        await interaction.response.edit_message(embed=embed, view=self, attachments=[file] if file else [])
+    @discord.ui.select(placeholder="Pick a photo", min_values=1, max_values=1, options=[discord.SelectOption(label="-")])
+    async def picker(self, interaction: discord.Interaction, select: discord.ui.Select):
+        # Ack immediately: re-uploading the photo as an attachment can take
+        # longer than the 3s initial-response window ("App did not respond").
+        await interaction.response.defer()
+        # Serialise picks and only commit the new index once the edit
+        # lands, so a failed/raced edit can't leave the server index out of
+        # step with the visible page.
+        async with self._lock:
+            target = int(select.values[0])
+            if target == self.index:
+                return
+            old = self.index
+            self.index = target
+            self._update_picker()
+            embed, file = self.embed_and_file()
+            try:
+                await interaction.edit_original_response(
+                    embed=embed, view=self, attachments=[file] if file else []
+                )
+            except Exception:
+                self.index = old
+                self._update_picker()
+                raise
 
     async def on_timeout(self):
         for item in self.children:
