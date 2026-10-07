@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<link rel="icon" href="siteresources/icon.png">
+		<meta charset="UTF-8">
+		<meta http-equiv="X-UA-Compatible" content="IE=edge">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<title>Template Editor - CiRCLE Chiffon</title>
+		<meta name="description" content="Lay out a custom CiRCLE Chiffon render template by drag and drop, then export it as layout.json.">
+
+		<meta name="theme-color" content="#FBD796">
+		<!-- Bootstrap -->
+		<link href="siteresources/bootstrap-4.4.1.css" rel="stylesheet">
+		<link href="siteresources/style.css" rel="stylesheet">
+		<link href="siteresources/template-editor.css" rel="stylesheet">
+	</head>
+	<body>
+		<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+			<a class="navbar-brand" href="index.html">CiRCLE Chiffon</a>
+			<a class="navbar-brand" href="https://github.com/etangaming123/circlechiffon">[view on GitHub]</a>
+		</nav>
+
+		<div class="container-fluid mt-3" id="editor">
+			<div class="row">
+				<aside class="col-lg-3 col-md-5 mb-3" id="sidebar">
+					<h1 class="h4">Template Editor</h1>
+					<p class="small muted">
+						Everything stays in your browser: images and layouts are never uploaded from this page.
+						When you're done, export <code>layout.json</code> and send it with your images through
+						<code>/cc-template-upload</code>. This preview is approximate (boxes, not the real render),
+						so check the real thing with <code>/cc-template-preview</code>.
+					</p>
+
+					<section class="panel">
+						<label for="kind-select">Render</label>
+						<select id="kind-select" class="form-control form-control-sm"></select>
+						<div class="btn-group btn-group-sm btn-group-toggle mt-2 d-none" id="view-toggle" role="group" aria-label="Which layout to edit">
+							<button type="button" class="btn btn-outline-light active" data-view="page">Page</button>
+							<button type="button" class="btn btn-outline-light" data-view="card">Card (all 50)</button>
+						</div>
+						<p class="small muted mt-2 mb-0" id="canvas-size"></p>
+					</section>
+
+					<section class="panel">
+						<h2 class="h6">Images</h2>
+						<label class="file-label">Base (drawn under the render)
+							<input type="file" id="base-input" accept="image/png,image/jpeg,image/webp" class="form-control-file form-control-sm">
+						</label>
+						<label class="file-label">Top (drawn over the render)
+							<input type="file" id="top-input" accept="image/png,image/jpeg,image/webp" class="form-control-file form-control-sm">
+						</label>
+						<div class="toggles">
+							<label><input type="checkbox" id="show-base" checked> Base</label>
+							<label><input type="checkbox" id="show-top" checked> Top</label>
+							<label><input type="checkbox" id="show-labels" checked> Labels</label>
+						</div>
+					</section>
+
+					<section class="panel">
+						<h2 class="h6">Layout</h2>
+						<div class="btn-row">
+							<button type="button" class="btn btn-success btn-sm" id="export-btn">Export layout.json</button>
+							<label class="btn btn-outline-light btn-sm mb-0" for="import-input">Import…</label>
+							<input type="file" id="import-input" accept="application/json,.json" class="d-none">
+							<button type="button" class="btn btn-outline-danger btn-sm" id="reset-btn">Reset</button>
+						</div>
+						<label class="mt-2 small" for="snap-input">Snap to grid (px, 0 = off)</label>
+						<input type="number" id="snap-input" class="form-control form-control-sm" min="0" max="200" value="0">
+						<div id="options" class="mt-2"></div>
+						<p class="small status" id="status" role="status" aria-live="polite"></p>
+					</section>
+
+					<section class="panel" id="selection-panel">
+						<h2 class="h6" id="selection-title">No element selected</h2>
+						<p class="small muted" id="selection-hint">Click an element on the canvas or in the list below. Arrow keys nudge it (Shift: ×10).</p>
+						<div id="selection-fields" class="d-none">
+							<div class="form-row">
+								<div class="col"><label class="small" for="f-x">x</label><input type="number" id="f-x" class="form-control form-control-sm"></div>
+								<div class="col"><label class="small" for="f-y">y</label><input type="number" id="f-y" class="form-control form-control-sm"></div>
+								<div class="col"><label class="small" for="f-w">w</label><input type="number" id="f-w" class="form-control form-control-sm" min="1"></div>
+								<div class="col"><label class="small" for="f-h">h</label><input type="number" id="f-h" class="form-control form-control-sm" min="1"></div>
+							</div>
+							<label class="mt-2"><input type="checkbox" id="f-visible"> Visible</label>
+							<div id="follow-row" class="form-row mt-1">
+								<div class="col-7">
+									<label class="small" for="f-follow">Follow (sits right after)</label>
+									<select id="f-follow" class="form-control form-control-sm"></select>
+								</div>
+								<div class="col-5"><label class="small" for="f-gap">gap</label><input type="number" id="f-gap" class="form-control form-control-sm"></div>
+							</div>
+							<p class="small muted mt-1 mb-0" id="resize-note"></p>
+						</div>
+					</section>
+
+					<section class="panel">
+						<h2 class="h6">Elements</h2>
+						<ul id="element-list" class="list-unstyled mb-0"></ul>
+					</section>
+				</aside>
+
+				<main class="col-lg-9 col-md-7">
+					<div class="zoom-row">
+						<span class="small muted">Zoom</span>
+						<div class="btn-group btn-group-sm" role="group" aria-label="Zoom">
+							<button type="button" class="btn btn-outline-light active" data-zoom="fit">Fit</button>
+							<button type="button" class="btn btn-outline-light" data-zoom="0.25">25%</button>
+							<button type="button" class="btn btn-outline-light" data-zoom="0.5">50%</button>
+							<button type="button" class="btn btn-outline-light" data-zoom="1">100%</button>
+						</div>
+					</div>
+					<div id="stage-scroll">
+						<div id="stage-wrap">
+							<div id="stage" tabindex="0" aria-label="Template canvas">
+								<div id="base-layer"></div>
+								<div id="context-layer"></div>
+								<div id="element-layer"></div>
+								<div id="top-layer"></div>
+							</div>
+						</div>
+					</div>
+				</main>
+			</div>
+		</div>
+
+		<footer class="text-center mt-4">
+			<p>etan • etangaming123 • etangamingxyz</p>
+		</footer>
+
+		<script src="siteresources/template-layouts.js"></script>
+		<script src="siteresources/template-editor.js"></script>
+	</body>
+</html>

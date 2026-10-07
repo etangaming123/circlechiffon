@@ -78,3 +78,16 @@ class CollectionPreset(Base):
     name: Mapped[str | None] = mapped_column(String(32), nullable=True)
     items: Mapped[str] = mapped_column(Text, nullable=False)
     saved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class TemplateWhitelist(Base):
+    """A Discord user allowed to upload custom render templates (see
+    customisation/store.py). The bot owner is always allowed and never
+    needs a row. The template files themselves live on disk under
+    user_templates/, not in the DB; removing a row stops them being used
+    but leaves the files in place."""
+
+    __tablename__ = "template_whitelist"
+
+    discord_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
