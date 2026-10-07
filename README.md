@@ -87,7 +87,7 @@ Do note that if you lack the "External Apps" permission in servers, you will sti
 The following are optional, but recommended:
 
 * A device capable of running the Python program for a while (if you plan on leaving the bot online most of the time)
-* `ffmpeg` and Playwright's Chromium, if you want `/cc-chart` to render videos
+* `ffmpeg`, if you want `/cc-chart` to render videos
 
 ### Discord Bot
 
@@ -106,12 +106,9 @@ Ensure you have everything with:
 Get all the required modules with:
 `pip install -r requirements.txt`
 
-`/cc-chart` additionally needs a browser and ffmpeg, neither of which `pip` can provide on its own:
+`/cc-chart` renders videos locally (no browser), but needs `ffmpeg` on your `PATH` — a system package (`brew install ffmpeg`, `apt install ffmpeg`, ...), not a Python one. Rendering is spread over several worker processes; set the `CC_CHART_WORKERS` environment variable to change how many (default: CPU cores minus one, at most 8).
 
-* `python -m playwright install chromium` — ~95MB, and a *separate* step: `pip install playwright` only installs the Python client. On Linux you may also need `python -m playwright install-deps chromium` (requires root).
-* `ffmpeg` on your `PATH` — a system package (`brew install ffmpeg`, `apt install ffmpeg`, ...), not a Python one.
-
-Both are checked at runtime. Without them `/cc-chart` still answers, it just replies with the chart's stats instead of a video; every other command is unaffected.
+ffmpeg and `skia-python` are checked at runtime. Without them `/cc-chart` still answers, it just replies with the chart's stats instead of a video; every other command is unaffected.
 
 Run the bot once with `python main.py` - it will create a `config.json` for you and prompt you to fill in your bot token (and optionally your Discord user ID as `owner_id`) before continuing.
 

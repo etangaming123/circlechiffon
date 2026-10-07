@@ -52,11 +52,19 @@ from circlechiffon.types import ChartType, Difficulty
 
 MANIFEST_URL = "https://mai-notes.com/data/manifest.json"
 PLAYER_URL = "https://mai-notes.com/player.html?chart={chart_id}"
-CHART_DATA_URL = "https://mai-notes.com/data/charts/{chart_id}.txt"
+# The chart text is server-rendered into this page's `<textarea
+# id="simaiInput">`. The player's bundle still has a fetch of
+# `/data/charts/<id>.txt`, but that path now serves the SPA shell (HTML,
+# 200) - confirmed live 2026-10-07 - so it's not usable.
+CHART_PAGE_URL = "https://mai-notes.com/player/{chart_id}"
 
 CACHE_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data" / "mainotes_cache"
 CACHE_FILE = CACHE_DIR / "manifest.json"
 CACHE_TTL_SECONDS = 24 * 60 * 60  # 1 day
+CHART_CACHE_DIR = CACHE_DIR / "charts"
+# Charts are occasionally corrected, but not often; a week keeps repeat
+# renders off the network without pinning a fix out forever.
+CHART_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60
 
 _TIMEOUT = 30.0  # 3.9MB, ~0.8s on a good link - but be generous
 _USER_AGENT = "circlechiffon/1.0 (maimai Discord bot; +https://mai-notes.com/)"
@@ -276,6 +284,64 @@ class MaiNotesCatalog:
             if chart is not None:
                 return chart
         return None
+
+
+_CHART_ID_RE = re.compile(r"^[0-9a-fA-F-]{8,64}$")
+
+
+def _extract_chart_text(html: str) -> str | None:
+    from selectolax.parser import HTMLParser
+
+    node = HTMLParser(html).css_first("textarea#simaiInput")
+    if node is None:
+        return None
+    text = node.text(deep=True)
+    return text if text.strip() else None
+
+
+async def fetch_chart_text(chart_id: str) -> str | None:
+    """A chart's simai text, from the disk cache or mai-notes' player page.
+    None if mai-notes has no data for it or can't be reached (a stale cache
+    is preferred over nothing)."""
+    if not _CHART_ID_RE.match(chart_id):
+        return None
+    cache = CHART_CACHE_DIR / f"{chart_id}.txt"
+    try:
+        fresh = (time.time() - cache.stat().st_mtime) < CHART_CACHE_TTL_SECONDS
+    except OSError:
+        fresh = False
+    if fresh:
+        try:
+            return await asyncio.to_thread(cache.read_text, encoding="utf-8")
+        except OSError:
+            pass
+
+    text = None
+    try:
+        async with httpx.AsyncClient(
+            timeout=_TIMEOUT, headers={"User-Agent": _USER_AGENT}, follow_redirects=True
+        ) as client:
+            resp = await client.get(CHART_PAGE_URL.format(chart_id=chart_id))
+            resp.raise_for_status()
+            text = _extract_chart_text(resp.text)
+    except httpx.HTTPError:
+        text = None
+
+    if text is None:
+        try:
+            return await asyncio.to_thread(cache.read_text, encoding="utf-8")
+        except OSError:
+            return None
+
+    def _write() -> None:
+        CHART_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        cache.write_text(text, encoding="utf-8")
+
+    try:
+        await asyncio.to_thread(_write)
+    except OSError:
+        pass
+    return text
 
 
 _catalog: MaiNotesCatalog | None = None

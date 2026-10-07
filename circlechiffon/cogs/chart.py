@@ -1,16 +1,19 @@
 """
-/cc-chart - render a chart from mai-notes.com as a video.
+/cc-chart - render a mai-notes.com chart as a video.
 
-Everything that knows how mai-notes works lives in
-`adapters/mainotes/`; everything that knows about ffmpeg lives in
-`renderers/chart_video.py`. This file is the Discord surface: resolve the
-user's song to a mai-notes chart, queue the render, and pick which of the
-several "can't render that" messages applies.
+The chart text comes from mai-notes (`adapters/mainotes/catalog.py`); the
+drawing is local (`renderers/chart_local.py`: simai -> skia frames -> x264
+across a process pool); the audio mux is `renderers/chart_video.py`. This
+file is the Discord surface: resolve the user's song to a mai-notes chart,
+queue the render, and pick which of the several "can't render that"
+messages applies.
 
-The render is the heaviest thing this bot does - a Chromium context, a few
-thousand canvas draws and an H.264 encode - so **rendering is owner-only**
-and serialised behind a semaphore. Everyone else gets the chart's data as an
-embed, which costs no more than /cc-info does.
+The render still takes every worker core for several seconds, so
+**rendering is owner-only** and serialised behind a semaphore. Everyone else
+gets the chart's data as an embed, which costs no more than /cc-info does.
+
+(`adapters/mainotes/player.py` - the old headless-Chromium capture - is no
+longer called from here.)
 """
 
 import asyncio
@@ -26,16 +29,16 @@ from discord.ext import commands
 
 from circlechiffon import access, embed_colors
 from circlechiffon.adapters.dxrating.images import jacket_url
-from circlechiffon.adapters.mainotes.catalog import MaiNotesChart, get_mainotes_catalog
-from circlechiffon.adapters.mainotes.player import (
+from circlechiffon.adapters.mainotes.catalog import MaiNotesChart, fetch_chart_text, get_mainotes_catalog
+from circlechiffon.renderers import chart_local
+from circlechiffon.renderers.chart_local import (
     HI_SPEED_DEFAULT,
     HI_SPEED_MAX,
     HI_SPEED_MIN,
     ChartRenderError,
     ChartRenderUnavailable,
-    capture_chart,
     clamp_hi_speed,
-    cleanup,
+    render_chart,
 )
 from circlechiffon.renderers.chart_video import (
     SIZE_BUDGET,
@@ -43,13 +46,13 @@ from circlechiffon.renderers.chart_video import (
     VideoEncodeError,
     encode_capture,
     ffmpeg_available,
+    ffmpeg_path,
 )
 from circlechiffon.songdata.catalog import get_catalog
 from circlechiffon.types import ChartType, Difficulty
 
-# One render at a time. Two concurrent Chromium contexts each doing
-# thousands of canvas draws thrash any modest host, and the throughput win
-# from running them in parallel is negative.
+# One render at a time. Each render already fans out across every worker
+# process, so running two at once only makes both slower.
 _RENDER_LOCK = asyncio.Semaphore(1)
 _MAX_QUEUE = 3
 _queued = 0
@@ -138,6 +141,17 @@ class ChartCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
+    async def cog_load(self) -> None:
+        # Workers are separate processes that each import numpy and skia;
+        # starting them now keeps that cost off the first render.
+        try:
+            await chart_local.start_workers()
+        except Exception as e:
+            print(f"Couldn't pre-start chart render workers ({e}); the first render will start them")
+
+    async def cog_unload(self) -> None:
+        await chart_local.stop_workers()
+
     @app_commands.command(
         name="cc-chart",
         description="Look up a chart on mai-notes.com (owner-only: render it as a video)",
@@ -146,7 +160,7 @@ class ChartCog(commands.Cog):
         title="Song title (or part of it, including English/romanized aliases) to search for",
         difficulty="Which difficulty's chart to render (default: MASTER)",
         chart_type="DX or Standard chart, for songs that have both (default: DX)",
-        notespeed="In-player note speed / ハイスピ, 3.0-9.0 (default: 7.5)",
+        notespeed="Note speed / ハイスピ, 1.0-10.0 (default: 7.5)",
         from_measure="Start at this measure instead of the beginning",
         to_measure="Stop at this measure instead of playing to the end",
     )
@@ -298,7 +312,7 @@ class ChartCog(commands.Cog):
         try:
             async with _RENDER_LOCK:
                 await interaction.edit_original_response(
-                    content=f"Rendering **{song.title}** [{difficulty.display_name}] on mai-notes.com..."
+                    content=f"Rendering **{song.title}** [{difficulty.display_name}]..."
                 )
                 await self._render_locked(
                     interaction, chart, song, difficulty, embed, hi_speed, from_measure, to_measure, bail
@@ -315,9 +329,21 @@ class ChartCog(commands.Cog):
             raw = tmp_dir / "capture.h264"
             out = tmp_dir / "chart.mp4"
 
+            chart_text = await fetch_chart_text(chart.id)
+            if chart_text is None:
+                await progress.stop()
+                bail()
+                embed.set_footer(text="Chart data from mai-notes.com")
+                await interaction.edit_original_response(
+                    content="Couldn't download this chart from mai-notes.com. Try again in a bit.",
+                    embed=embed,
+                )
+                return
+
             try:
-                capture = await capture_chart(
-                    chart.id, raw,
+                capture = await render_chart(
+                    chart_text, raw,
+                    ffmpeg=ffmpeg_path(),
                     hi_speed=hi_speed,
                     from_measure=from_measure,
                     to_measure=to_measure,
@@ -326,7 +352,9 @@ class ChartCog(commands.Cog):
                 )
                 await progress.stop()
                 await interaction.edit_original_response(content="Encoding video...")
-                await encode_capture(capture, out, size_limit=limit)
+                # Note times come straight from the chart, so no capture
+                # latency correction applies.
+                await encode_capture(capture, out, size_limit=limit, sfx_shift_ms=0)
             except ChartRenderUnavailable as e:
                 await progress.stop()
                 bail()
@@ -341,7 +369,7 @@ class ChartCog(commands.Cog):
                 await interaction.edit_original_response(content=f"The render failed: {e}")
                 return
             finally:
-                cleanup(raw)
+                raw.unlink(missing_ok=True)
 
             data = out.read_bytes()
 
@@ -349,7 +377,7 @@ class ChartCog(commands.Cog):
             f"Note speed {hi_speed:g}",
             f"{capture.duration_seconds:.0f}s",
             f"measures {capture.start_measure}-{capture.end_measure}/{capture.total_measures}",
-            "rendered from mai-notes.com",
+            "chart data from mai-notes.com",
         ]
         embed.set_footer(text=" · ".join(footer))
         note = ""
