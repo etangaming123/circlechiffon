@@ -39,6 +39,8 @@ class TemplateKind:
     # layout-level colour slots (layout.json `colors`) -> editor label; the
     # slot names and stock values are default_layout()["colors"]
     color_labels: dict[str, str] | None = None
+    # layout-level opacity slots (layout.json `opacities`) -> editor label
+    opacity_labels: dict[str, str] | None = None
 
 
 TEMPLATE_KINDS: dict[str, TemplateKind] = {
@@ -50,7 +52,7 @@ TEMPLATE_KINDS: dict[str, TemplateKind] = {
     ),
     "profile_core": TemplateKind(
         "profile_core", "Profile core (/cc-profile)", profile.default_core_layout, profile.CORE_LABELS,
-        color_labels=profile.CORE_COLOR_LABELS,
+        color_labels=profile.CORE_COLOR_LABELS, opacity_labels=profile.CORE_OPACITY_LABELS,
     ),
     "profile_extra": TemplateKind(
         "profile_extra", "Profile extra (/cc-profile view:extra)", profile.default_extras_layout, profile.EXTRAS_LABELS,
@@ -78,6 +80,7 @@ def editor_defaults() -> dict:
             "textElements": sorted(spec.text_elements),
             "cardTextElements": sorted(spec.card_text_elements),
             "colorLabels": spec.color_labels or {},
+            "opacityLabels": spec.opacity_labels or {},
         }
         for key, spec in TEMPLATE_KINDS.items()
     }

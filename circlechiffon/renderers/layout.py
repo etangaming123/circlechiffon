@@ -15,6 +15,7 @@ after adding or moving an element, or the editor drifts from the renderer.
 """
 
 import io
+import math
 import re
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -48,6 +49,24 @@ def merge_colors(defaults: dict | None, user: dict | None) -> dict[str, str]:
             if slot in colors and isinstance(value, str) and _HEX_COLOR.match(value):
                 colors[slot] = value.lower()
     return colors
+
+
+def merge_opacities(defaults: dict | None, user: dict | None) -> dict[str, float]:
+    """Opacity slots: the defaults' `opacities` with the user's finite
+    0..1 numbers laid over the slots the defaults know. Anything else is
+    silently ignored here (validate.py is the strict gate at upload)."""
+    opacities = {slot: float(value) for slot, value in (defaults or {}).items()}
+    if isinstance(user, dict):
+        for slot, value in user.items():
+            if (
+                slot in opacities
+                and isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and math.isfinite(value)
+                and 0 <= value <= 1
+            ):
+                opacities[slot] = float(value)
+    return opacities
 
 
 @contextmanager
@@ -142,9 +161,10 @@ class Layout:
     (e.g. the rating badge after a variable-width name) can sit right
     after it - elements must be drawn in follow order."""
 
-    def __init__(self, elements: dict, defaults: dict, options: dict, card: "Layout | None" = None, colors: dict | None = None):
+    def __init__(self, elements: dict, defaults: dict, options: dict, card: "Layout | None" = None, colors: dict | None = None, opacities: dict | None = None):
         self._elements = elements
         self.colors = colors or {}
+        self.opacities = opacities or {}
         self._defaults = defaults
         self.options = options
         self.card = card
@@ -168,7 +188,8 @@ class Layout:
             user_card = (user.get("card") or {}).get("elements")
             card = cls(_merge_elements(card_defaults, user_card, scale), card_defaults, {})
         colors = merge_colors(defaults.get("colors"), user.get("colors"))
-        return cls(_merge_elements(defaults["elements"], user.get("elements"), scale), defaults["elements"], options, card, colors)
+        opacities = merge_opacities(defaults.get("opacities"), user.get("opacities"))
+        return cls(_merge_elements(defaults["elements"], user.get("elements"), scale), defaults["elements"], options, card, colors, opacities)
 
     def reset_drawn(self) -> None:
         self._drawn_right.clear()
@@ -226,6 +247,11 @@ class Layout:
         """A layout-level colour slot (default overlaid by the user's
         `colors`) as an RGB tuple."""
         return hex_to_rgb(self.colors[slot])
+
+    def opacity_slot(self, slot: str) -> float:
+        """A layout-level opacity slot (default overlaid by the user's
+        `opacities`), 0..1."""
+        return self.opacities[slot]
 
     def raw(self, name: str) -> dict:
         return self._elements[name]

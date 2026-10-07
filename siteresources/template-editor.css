@@ -262,3 +262,12 @@
 	margin: 0;
 	font-size: 0.85rem;
 }
+
+.opacity-row {
+	margin-bottom: 0.4rem;
+}
+
+.opacity-row label {
+	margin: 0;
+	font-size: 0.85rem;
+}

@@ -149,6 +149,12 @@
 				}
 			}
 		}
+		if (defaults.opacities && incoming.opacities && typeof incoming.opacities === "object") {
+			for (const slot of Object.keys(defaults.opacities)) {
+				const v = incoming.opacities[slot];
+				if (typeof v === "number" && isFinite(v)) defaults.opacities[slot] = Math.min(1, Math.max(0, v));
+			}
+		}
 		if (incoming.options && typeof incoming.options === "object") {
 			for (const key of Object.keys(defaults.options || {})) {
 				if (typeof incoming.options[key] === "boolean") defaults.options[key] = incoming.options[key];
@@ -611,6 +617,7 @@
 			options: l.options,
 		};
 		if (l.colors) out.colors = l.colors;
+		if (l.opacities) out.opacities = l.opacities;
 		if (l.card) out.card = { elements: l.card.elements };
 		const blob = new Blob([JSON.stringify(out, null, 1)], { type: "application/json" });
 		const a = document.createElement("a");
@@ -674,7 +681,8 @@
 		els.colors.replaceChildren();
 		const slots = spec().colorLabels || {};
 		const names = Object.keys(slots);
-		els.colorsPanel.classList.toggle("d-none", !names.length);
+		const opacityLabels = spec().opacityLabels || {};
+		els.colorsPanel.classList.toggle("d-none", !names.length && !Object.keys(opacityLabels).length);
 		const current = layout().colors || {};
 		const stock = spec().defaults.colors || {};
 		for (const slot of names) {
@@ -702,6 +710,31 @@
 			});
 			label.htmlFor = "";
 			row.append(input, label, reset);
+			els.colors.appendChild(row);
+		}
+
+		// layout-wide opacity sliders (e.g. count pill background / icon / text)
+		const levels = layout().opacities || {};
+		for (const slot of Object.keys(opacityLabels)) {
+			const row = document.createElement("div");
+			row.className = "opacity-row";
+			const label = document.createElement("label");
+			const value = document.createElement("span");
+			const show = (v) => (value.textContent = Math.round(v * 100) + "%");
+			label.append(opacityLabels[slot] + " ", value);
+			const input = document.createElement("input");
+			input.type = "range";
+			input.className = "custom-range";
+			input.min = "0";
+			input.max = "100";
+			input.value = String(Math.round((levels[slot] == null ? 1 : levels[slot]) * 100));
+			show(input.value / 100);
+			input.addEventListener("input", () => {
+				layout().opacities[slot] = input.value / 100;
+				show(input.value / 100);
+				save();
+			});
+			row.append(label, input);
 			els.colors.appendChild(row);
 		}
 	}

@@ -250,6 +250,18 @@ def validate_layout(data: bytes, kind: str) -> tuple[dict, list[str]]:
                 elif (c := _color(value, f"colors.{slot}", errors)) is not None:
                     clean["colors"][slot] = c
 
+    if "opacities" in raw:
+        slots = defaults.get("opacities", {})
+        if not isinstance(raw["opacities"], dict):
+            errors.append("opacities must be an object.")
+        else:
+            clean["opacities"] = {}
+            for slot, value in raw["opacities"].items():
+                if slot not in slots:
+                    warnings.append(f"Ignored unknown opacity {slot}.")
+                elif (n := _opacity(value, f"opacities.{slot}", errors)) is not None:
+                    clean["opacities"][slot] = n
+
     options = raw.get("options", {})
     if not isinstance(options, dict):
         errors.append("options must be an object.")

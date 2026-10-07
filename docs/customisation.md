@@ -70,6 +70,7 @@ A template has up to three parts, and each one is optional:
 - Coordinates are output pixels at `canvas` size. A layout authored at a different width is scaled to fit.
 - Any element or key you leave out keeps its default, so a file only needs to contain what it changes. The editor exports everything.
 - Styling keys, all optional: `opacity` (0 to 1), and on text elements only `color` and `outline_color` (`"#rrggbb"`) and `outline_width` (0 to 32, in canvas pixels, scaled with the box height like the font). A key left out keeps the stock colour, so a plain layout renders exactly as before. Style keys on a non-text element are ignored with a warning.
+- `opacities` maps a layout-wide opacity slot to 0 to 1. Profile core has `pill_background`, `pill_icon` and `pill_text` for the music-count rows, so the pill, the tier icon and the count can fade independently (each also multiplies with the row's own `opacity`). Unknown slots are ignored with a warning; out-of-range values reject the upload.
 - `colors` maps a colour slot to `"#rrggbb"`, e.g. `"colors": {"pill_fill": "#ff8fd0"}`. Slots differ per kind (the editor's *Colours* panel lists them); unknown slots are ignored with a warning and a bad hex value rejects the upload. Slots you leave out keep the stock colour.
 - Text elements scale their font with the box height. Image elements scale to the box height.
 - Unknown elements, keys and options are ignored, with a warning at upload. Wrong types, non-finite numbers, out-of-range values and `follow` loops reject the whole upload, and nothing is saved.

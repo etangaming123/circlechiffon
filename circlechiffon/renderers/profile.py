@@ -169,6 +169,7 @@ def _draw_title_capsule(
 
 
 def _draw_count_pill(
+    image: Image.Image,
     draw: ImageDraw.ImageDraw,
     x: int,
     y: int,
@@ -181,6 +182,8 @@ def _draw_count_pill(
     border_color: tuple[int, int, int] = _PILL_BORDER_COLOR,
     fill_color: tuple[int, int, int] = _PILL_FILL_COLOR,
     text_color: tuple[int, int, int] = _PILL_TEXT_COLOR,
+    background_opacity: float = 1.0,
+    text_opacity: float = 1.0,
 ) -> None:
     """Light-blue rounded "pill" holding a right-aligned count, matching the
     real playerData page's own music-count rows (a colored tier badge next
@@ -190,21 +193,24 @@ def _draw_count_pill(
     reads on whatever the template's own art puts behind it."""
     if background:
         radius = h // 2
-        draw.rounded_rectangle([(x, y), (x + w, y + h)], radius=radius, fill=border_color)
-        inset = 3
-        draw.rounded_rectangle(
-            [(x + inset, y + inset), (x + w - inset, y + h - inset)],
-            radius=max(radius - inset, 2),
-            fill=fill_color,
-        )
+        with _opacity(image, background_opacity, (x, y, x + w + 1, y + h + 1)):
+            draw.rounded_rectangle([(x, y), (x + w, y + h)], radius=radius, fill=border_color)
+            inset = 3
+            draw.rounded_rectangle(
+                [(x + inset, y + inset), (x + w - inset, y + h - inset)],
+                radius=max(radius - inset, 2),
+                fill=fill_color,
+            )
     text_w = draw.textlength(text, font=font)
     bbox = draw.textbbox((0, 0), text, font=font)
     text_h = bbox[3] - bbox[1]
     pos = (x + w - 14 - text_w, y + (h - text_h) / 2 - bbox[1])
-    if background:
-        draw.text(pos, text, font=font, fill=text_color)
-    else:
-        draw.text(pos, text, font=font, fill=(255, 255, 255), stroke_width=2, stroke_fill=(20, 20, 20))
+    text_region = (pos[0] - 3, y, x + w + 1, y + h + 1)
+    with _opacity(image, text_opacity, text_region):
+        if background:
+            draw.text(pos, text, font=font, fill=text_color)
+        else:
+            draw.text(pos, text, font=font, fill=(255, 255, 255), stroke_width=2, stroke_fill=(20, 20, 20))
 
 
 # element names for the 21 music-count rows, e.g. "row_combo_ap" - one
@@ -250,6 +256,7 @@ def default_core_layout() -> dict:
             "pill_fill": _rgb_hex(_PILL_FILL_COLOR),
             "pill_text": _rgb_hex(_PILL_TEXT_COLOR),
         },
+        "opacities": {"pill_background": 1.0, "pill_icon": 1.0, "pill_text": 1.0},
         "options": {"count_pill_background": True},
     }
 
@@ -266,6 +273,12 @@ CORE_COLOR_LABELS = {
     "pill_border": "Count pill border",
     "pill_fill": "Count pill fill",
     "pill_text": "Count pill text",
+}
+
+CORE_OPACITY_LABELS = {
+    "pill_background": "Count pill background",
+    "pill_icon": "Count tier icon",
+    "pill_text": "Count text",
 }
 
 CORE_LABELS = {
@@ -440,9 +453,10 @@ def render_profile_core(
             # height as the rest makes it look oversized in its narrow box.
             icon_target_h = round((26 if entry.category == "clear" else 42) * s)
             icon_y = box.y + (box.h - icon_target_h) // 2
-            used = _paste_icon_centered(
-                image, badge_icons.get(f"{entry.category}:{entry.tag}"), icon_center_x, icon_y, icon_target_h, icon_box_w - round(6 * s)
-            )
+            with _opacity(image, layout.opacity_slot("pill_icon"), (box.x, box.y, box.x + icon_box_w, box.bottom)):
+                used = _paste_icon_centered(
+                    image, badge_icons.get(f"{entry.category}:{entry.tag}"), icon_center_x, icon_y, icon_target_h, icon_box_w - round(6 * s)
+                )
             label_font = font(_INTER_REGULAR, round(11 * s))
             if used == 0:
                 # no icon available (e.g. remote fetch failed) - fall back to
@@ -456,9 +470,10 @@ def render_profile_core(
             pill_x = box.x + icon_box_w + round(GRID_ICON_PILL_GAP * s)
             count_text = f"{entry.earned:,}/{entry.total:,}" if entry.earned is not None and entry.total is not None else "-"
             _draw_count_pill(
-                draw, pill_x, box.y, box.right - pill_x, box.h, count_text, font(_INTER_BOLD, round(17 * s)),
+                image, draw, pill_x, box.y, box.right - pill_x, box.h, count_text, font(_INTER_BOLD, round(17 * s)),
                 background=pill_background,
                 border_color=layout.color("pill_border"), fill_color=layout.color("pill_fill"), text_color=layout.color("pill_text"),
+                background_opacity=layout.opacity_slot("pill_background"), text_opacity=layout.opacity_slot("pill_text"),
             )
 
     _draw_footer(image, draw, CANVAS_HEIGHT_CORE, CORE_CANVAS_WIDTH)
