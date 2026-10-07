@@ -13,13 +13,20 @@ spawn-mode pools (the only kind on Windows) re-import the parent's
 (possibly prompting on stdin), imports all of discord.py and builds the bot.
 
 stdout is the protocol channel; nothing else may print to it.
+
+Ctrl+C in the bot's terminal reaches every process in the group, workers
+included, and each would print its own KeyboardInterrupt traceback. Workers
+ignore SIGINT instead: the bot ends them by closing their stdin (or killing
+them), and if it dies outright they exit quietly on the broken pipe.
 """
 
 import json
+import signal
 import sys
 
 
 def main() -> None:
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
     from circlechiffon.renderers.chart_local import _ChunkJob, _render_chunk
 
     for line in sys.stdin:
@@ -31,8 +38,11 @@ def main() -> None:
             reply = {"ok": True, "frames": _render_chunk(job)}
         except Exception as e:  # report it and stay up for the next job
             reply = {"ok": False, "error": f"{type(e).__name__}: {e}"}
-        sys.stdout.write(json.dumps(reply) + "\n")
-        sys.stdout.flush()
+        try:
+            sys.stdout.write(json.dumps(reply) + "\n")
+            sys.stdout.flush()
+        except (BrokenPipeError, OSError):  # the bot is gone
+            break
 
 
 if __name__ == "__main__":
