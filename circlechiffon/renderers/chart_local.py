@@ -1035,7 +1035,13 @@ async def render_chart(
         await asyncio.to_thread(_join)
     finally:
         for file in all_files:
-            file.unlink(missing_ok=True)
+            # On Windows a chunk can still be open in a killed worker's
+            # ffmpeg for a moment; a leftover temp file mustn't replace the
+            # error (or cancellation) that got us here.
+            try:
+                file.unlink(missing_ok=True)
+            except OSError:
+                pass
 
     return [
         CaptureResult(

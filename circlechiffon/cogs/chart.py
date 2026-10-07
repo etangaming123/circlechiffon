@@ -3,7 +3,10 @@
 
 The chart text comes from mai-notes (`adapters/mainotes/catalog.py`); the
 drawing is local (`renderers/chart_local.py`: simai -> skia frames -> x264
-across a process pool); the audio mux is `renderers/chart_video.py`. This
+across a process pool); the audio mux is `renderers/chart_video.py`. With
+`config.chart_render_server` set, both run on that machine instead
+(`render_server.py`, via `renderers/chart_remote.py`), falling back to this
+one if it can't be reached. This
 file is the Discord surface: resolve the user's song to a mai-notes chart,
 queue the render, and pick which of the several "can't render that"
 messages applies.
@@ -54,6 +57,7 @@ from circlechiffon.renderers.chart_local import (
     clamp_hi_speed,
     render_chart,
 )
+from circlechiffon.renderers.chart_remote import RemoteUnavailable, render_remote
 from circlechiffon.renderers.chart_video import (
     SIZE_BUDGET,
     FfmpegUnavailable,
@@ -70,6 +74,9 @@ from circlechiffon.types import ChartType, Difficulty
 _RENDER_COOLDOWN = 30
 _RENDER_COOLDOWN_KEY = "cc-chart-render"
 _MAX_QUEUE = 5
+# Sent when `config.chart_render_server` is set but can't take the render,
+# just before this machine renders it instead.
+_REMOTE_DOWN_MESSAGE = "Main renderer is down - this render will take a long time."
 
 
 class _RenderQueue:
@@ -424,6 +431,42 @@ class ChartCog(commands.Cog):
             if rendered and not owner:
                 access.set_cooldown(user_id, _RENDER_COOLDOWN_KEY, _RENDER_COOLDOWN)
 
+    async def _render_here(self, interaction, progress, tmp_dir, chart_text, hi_speed, from_measure, to_measure,
+                           limit, render_mode):
+        """Renders on this machine. Returns (captures, mp4 bytes per part),
+        the same pair `render_remote` returns."""
+        raw = tmp_dir / "capture.h264"
+        captures = []
+        # "game" plays maimai's own tap sound when the skin import
+        # brought it along; everything else keeps mai-notes' pair.
+        hit_sound = chart_skin.game_hit_sound() if render_mode == MODE_GAME or render_mode == MODE_MISS else None
+        try:
+            captures = await render_chart(
+                chart_text, raw,
+                ffmpeg=ffmpeg_path(),
+                hi_speed=hi_speed,
+                from_measure=from_measure,
+                to_measure=to_measure,
+                size_budget_bytes=limit,
+                progress=progress.update,
+                render_mode=render_mode,
+            )
+            await progress.stop()
+            plural = f" ({len(captures)} parts)" if len(captures) > 1 else ""
+            await interaction.edit_original_response(content=f"Encoding video{plural}...")
+            outs = []
+            for k, capture in enumerate(captures, start=1):
+                out = tmp_dir / f"chart-{k}.mp4"
+                # Note times come straight from the chart, so no capture
+                # latency correction applies.
+                await encode_capture(capture, out, size_limit=limit, sfx_shift_ms=0, hit_sound=hit_sound)
+                outs.append(out)
+        finally:
+            for capture in captures:
+                capture.video_path.unlink(missing_ok=True)
+            raw.unlink(missing_ok=True)
+        return captures, [out.read_bytes() for out in outs]
+
     async def _render_locked(self, interaction, chart, song, difficulty, embed, hi_speed, from_measure, to_measure,
                              bail, render_mode) -> bool:
         """Returns whether a render was actually attempted (which is what
@@ -433,7 +476,6 @@ class ChartCog(commands.Cog):
 
         with tempfile.TemporaryDirectory(prefix="cc-chart-") as tmp:
             tmp_dir = Path(tmp)
-            raw = tmp_dir / "capture.h264"
 
             chart_text = await fetch_chart_text(chart.id)
             if chart_text is None:
@@ -446,32 +488,31 @@ class ChartCog(commands.Cog):
                 )
                 return False
 
-            captures = []
             started = time.perf_counter()
-            # "game" plays maimai's own tap sound when the skin import
-            # brought it along; everything else keeps mai-notes' pair.
-            hit_sound = chart_skin.game_hit_sound() if render_mode == MODE_GAME or render_mode == MODE_MISS else None
             try:
-                captures = await render_chart(
-                    chart_text, raw,
-                    ffmpeg=ffmpeg_path(),
-                    hi_speed=hi_speed,
-                    from_measure=from_measure,
-                    to_measure=to_measure,
-                    size_budget_bytes=limit,
-                    progress=progress.update,
-                    render_mode=render_mode,
-                )
-                await progress.stop()
-                plural = f" ({len(captures)} parts)" if len(captures) > 1 else ""
-                await interaction.edit_original_response(content=f"Encoding video{plural}...")
-                outs = []
-                for k, capture in enumerate(captures, start=1):
-                    out = tmp_dir / f"chart-{k}.mp4"
-                    # Note times come straight from the chart, so no capture
-                    # latency correction applies.
-                    await encode_capture(capture, out, size_limit=limit, sfx_shift_ms=0, hit_sound=hit_sound)
-                    outs.append(out)
+                captures = videos = None
+                if config.chart_render_server:
+                    try:
+                        captures, videos = await render_remote(
+                            config.chart_render_server, config.chart_render_key,
+                            chart_text=chart_text,
+                            hi_speed=hi_speed,
+                            from_measure=from_measure,
+                            to_measure=to_measure,
+                            size_budget_bytes=limit,
+                            render_mode=render_mode,
+                            progress=progress.update,
+                        )
+                        await progress.stop()
+                    except RemoteUnavailable as e:
+                        print(f"Remote chart renderer unavailable, rendering locally: {e}")
+                        with contextlib.suppress(discord.HTTPException):
+                            await interaction.followup.send(_REMOTE_DOWN_MESSAGE)
+                if captures is None:
+                    captures, videos = await self._render_here(
+                        interaction, progress, tmp_dir, chart_text, hi_speed, from_measure, to_measure, limit,
+                        render_mode,
+                    )
                 render_seconds = time.perf_counter() - started
             except ChartRenderUnavailable as e:
                 await progress.stop()
@@ -486,12 +527,6 @@ class ChartCog(commands.Cog):
                 await progress.stop()
                 await interaction.edit_original_response(content=f"The render failed: {e}")
                 return True
-            finally:
-                for capture in captures:
-                    capture.video_path.unlink(missing_ok=True)
-                raw.unlink(missing_ok=True)
-
-            videos = [out.read_bytes() for out in outs]
 
         first, last = captures[0], captures[-1]
         footer = [

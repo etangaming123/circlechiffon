@@ -8,3 +8,4 @@ aiolimiter>=1.1
 Pillow>=10
 skia-python>=87
 numpy>=1.26
+flask>=3.0  # only for render_server.py, on the machine that renders

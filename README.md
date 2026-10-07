@@ -116,6 +116,23 @@ python import_chart_skin.py /path/to/MajdataPlay --skin Deluxe
 
 It copies the skin and MajdataPlay's tap sound into `assets/chart_skin/` (gitignored) and extracts MajdataPlay's slide layouts. Without it, the game modes fall back to the mai-notes style and sounds.
 
+#### Rendering on another machine (optional)
+
+Renders can run on a faster computer on the same network instead. On that machine, clone this repo, `pip install -r requirements.txt`, install ffmpeg, and run `import_chart_skin.py` there too if you want the game modes. Then pick a shared secret (`python -c "import secrets; print(secrets.token_urlsafe(32))"`) and start the server with it:
+
+```
+CC_RENDER_SERVER_KEY=<secret> python render_server.py --port 8765
+```
+
+On the bot's machine, add the server's address and the same secret to `config.json`:
+
+```json
+"chart_render_server": "http://192.168.1.50:8765",
+"chart_render_key": "<secret>"
+```
+
+The key is encrypted in place the next time the bot starts. Give the render machine a fixed LAN address (a DHCP reservation on your router) so the URL keeps working. If the server is off or unreachable, `/cc-chart` says so and renders on the bot's machine as before. Leave `chart_render_server` empty to always render locally.
+
 ffmpeg and `skia-python` are checked at runtime. Without them `/cc-chart` still answers, it just replies with the chart's stats instead of a video; every other command is unaffected.
 
 Run the bot once with `python main.py` - it will create a `config.json` for you and prompt you to fill in your bot token (and optionally your Discord user ID as `owner_id`) before continuing.
