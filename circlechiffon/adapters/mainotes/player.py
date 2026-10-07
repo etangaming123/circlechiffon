@@ -533,9 +533,11 @@ async def _capture(
 
         # The chart text arrives well after the page shell, and the play
         # button stays `disabled` until it parses - clicking early is a
-        # silent no-op, not an error.
-        async with page.expect_response(lambda r: f"/data/charts/{chart_id}" in r.url):
-            await page.goto(PLAYER_URL.format(chart_id=chart_id), wait_until="domcontentloaded")
+        # silent no-op, not an error. Don't wait on a `/data/charts/<id>`
+        # response: the site no longer fetches it as a separate request
+        # (that wait timed out every render), so the slider check below
+        # is what proves the chart parsed.
+        await page.goto(PLAYER_URL.format(chart_id=chart_id), wait_until="domcontentloaded")
         await page.wait_for_selector("#playPauseButton")
         await page.wait_for_selector("canvas")
         await page.wait_for_function(
