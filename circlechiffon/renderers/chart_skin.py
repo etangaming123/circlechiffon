@@ -52,6 +52,21 @@ _HIT_STARS = (
     ((0.473, -0.468), (0.3504, -0.3467), 0.5, 0.8, -1.0),
     ((-0.502, 0.492), (-0.3719, 0.3644), 0.5, 0.8, -1.0),
 )
+# TouchJudgeEffect.prefab + touchPerfect.anim: (sprite, group, x, y, angle,
+# scale). Groups scale as a whole: "inner" 1 -> 1.5, "outer" 0 -> 1.2 over
+# the 0.317s the effect lasts; everything fades 1 -> 0 over the same time.
+_TOUCH_SPARKS = (
+    *(("fx/TouchEffparts_02", "inner", x, y, 0.0, 0.173)
+      for x, y in ((0.0, -0.246), (0.0, 0.246), (0.246, 0.0), (-0.246, 0.0))),
+    *(("fx/TouchEffparts_02", "outer", x, y, 315.0, 0.315)
+      for x, y in ((0.254, 0.256), (0.254, -0.256), (-0.254, -0.256), (-0.254, 0.256))),
+    *(("fx/TouchEffparts_01", "outer", x, y, 0.0, 0.315)
+      for x, y in ((0.0, 0.359), (0.0, -0.359), (-0.359, 0.0), (0.359, 0.0))),
+)
+_TOUCH_HIT_SECONDS = 0.317
+_TOUCH_CIRCLE_TINT = (255, 254, 119)
+_TOUCH_SPARK_TINT = (255, 230, 119)
+
 # Firework rays cycle the note palette: each yellow, touch blue, tap magenta.
 _FIREWORK_COLORS = ((255, 215, 0), (0, 191, 255), (255, 64, 200))
 _FIREWORK_SECONDS = 0.6
@@ -414,7 +429,11 @@ class SkinPainter:
         """Perfect hit (tapEffect.anim): a star bursts 0 -> 0.7 -> 1.3 while
         four small stars orbit it and draw in to its centre; everything fades
         out between 0.233s and 0.417s. The skin's own tap burst is a hexagon
-        (Hex.png, stars are the break burst); stars are used for both."""
+        (Hex.png, stars are the break burst); stars are used for both.
+        Touches have their own effect (`_touch_hit`)."""
+        if touch and self.skin.get("fx/TouchEff") is not None:
+            self._touch_hit(canvas, pos, since)
+            return
         if since > 0.417:
             return
         img = self.skin.get("fx/Star")
@@ -441,6 +460,28 @@ class SkinPainter:
             world = root @ g.mat_r(direction * orbit) @ g.mat_t(x, y) @ g.mat_r(-direction * orbit) @ g.mat_s(
                 small, small)
             self.sprite(canvas, img, world, alpha=alpha)
+
+    def _touch_hit(self, canvas, pos, since):
+        """touchPerfect.anim: a yellow glow ring opening out, inside a ring of
+        small sparkles that swells and an outer ring that pops out."""
+        if since > _TOUCH_HIT_SECONDS:
+            return
+        f = since / _TOUCH_HIT_SECONDS
+        alpha = 1.0 - f
+        if since < 0.167:
+            ring = 0.1 + 0.2 * since / 0.167
+        else:
+            ring = 0.3 + 0.05 * (since - 0.167) / (_TOUCH_HIT_SECONDS - 0.167)
+        self.sprite(canvas, self.skin.get("fx/TouchEff"), self.frame(pos, 0.0, ring), alpha=alpha,
+                    tint=_TOUCH_CIRCLE_TINT)
+        group_scale = {"inner": 1.0 + 0.5 * f, "outer": 1.2 * f}
+        base = self.frame(pos)
+        for name, group, x, y, angle, scale in _TOUCH_SPARKS:
+            g_scale = group_scale[group]
+            if g_scale <= 0:
+                continue
+            world = base @ g.mat_s(g_scale, g_scale) @ g.mat_t(x, y) @ g.mat_r(angle) @ g.mat_s(scale, scale)
+            self.sprite(canvas, self.skin.get(name), world, alpha=alpha, tint=_TOUCH_SPARK_TINT)
 
     def firework(self, canvas, pos, since):
         """Firework_new.png is 24 white rays. Drawn large, thickened by

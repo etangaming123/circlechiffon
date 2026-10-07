@@ -380,12 +380,31 @@ class VectorPainter:
     # -- effects ----------------------------------------------------------------
 
     def hit(self, canvas, pos, rot, since, touch=False):
+        if touch:
+            self._touch_hit(canvas, pos, since)
+            return
         if since > 0.2:
             return
         f = since / 0.2
         x, y = self.xy(pos)
-        r = self.R / 12.5 * 1.36 * (1.0 + 0.8 * f) * (0.8 if touch else 1.0)
+        r = self.R / 12.5 * 1.36 * (1.0 + 0.8 * f)
         canvas.drawCircle(x, y, r, self._stroke(WHITE, self.line * 1.5, 1.0 - f))
+
+    def _touch_hit(self, canvas, pos, since):
+        """A plain take on the game's touch hit: a soft disc opening out
+        with four sparkle points, fading over 0.3s."""
+        if since > 0.3:
+            return
+        f = since / 0.3
+        x, y = self.xy(pos)
+        r = self.R * (0.06 + 0.12 * (1 - (1 - f) ** 2))
+        canvas.drawCircle(x, y, r, self._col(self.fill, WHITE, 0.25 * (1 - f)))
+        canvas.drawCircle(x, y, r, self._stroke(WHITE, self.line, 0.6 * (1 - f)))
+        d = r * 1.25
+        for k in range(4):
+            a = k * math.pi / 2
+            canvas.drawCircle(x + math.cos(a) * d, y + math.sin(a) * d, self.line * 1.5,
+                              self._col(self.fill, WHITE, 0.8 * (1 - f)))
 
     def firework(self, canvas, pos, since):
         """A faint ring of thin white rays - mai-notes has no firework
