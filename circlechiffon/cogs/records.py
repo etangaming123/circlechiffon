@@ -15,6 +15,7 @@ from circlechiffon.adapters.maimai_net.errors import MaimaiNetError, SessionExpi
 from circlechiffon.ratingcalc.best50 import calculate_best50
 from circlechiffon.ratingcalc.calculator import calculate_rating, rank_tag_for_achievement
 from circlechiffon.ratingcalc.judgement_loss import calculate_judgement_loss
+from circlechiffon.customisation.store import get_user_template
 from circlechiffon.renderers.b50 import render_b50
 from circlechiffon.renderers.b50_share import build_detail_view_url
 from circlechiffon.renderers.judgement_detail import render_judgement_detail
@@ -529,6 +530,7 @@ class RecordsCog(commands.Cog):
             }
             badge_icons = await get_all_badge_icons()
             version_logo_bytes = await get_version_logo()
+            template = await get_user_template(interaction.user.id, "b50")
 
             # B15 eligibility window (see calculate_best50) is normally
             # {current_version, previous_version} - name it after the
@@ -556,6 +558,7 @@ class RecordsCog(commands.Cog):
                 badge_icons=badge_icons,
                 version_logo_bytes=version_logo_bytes,
                 output=buf,
+                template=template,
             )
 
             new_entries = [e for e in result.b15 if e is not None]

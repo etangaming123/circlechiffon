@@ -1,0 +1,224 @@
+#editor {
+	color: #e8ecf8;
+}
+
+#editor label,
+#editor .h4,
+#editor .h6 {
+	color: #e8ecf8;
+}
+
+#editor .muted {
+	color: #9aa6c8;
+}
+
+#editor code {
+	color: #FBD796;
+}
+
+.panel {
+	background-color: #151d38;
+	border: 1px solid #25305a;
+	border-radius: 6px;
+	padding: 10px 12px;
+	margin-bottom: 10px;
+}
+
+.file-label {
+	display: block;
+	font-size: 0.85rem;
+	margin-bottom: 6px;
+}
+
+.toggles label {
+	margin-right: 12px;
+	font-size: 0.85rem;
+}
+
+.btn-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.status {
+	min-height: 1.2em;
+	margin: 6px 0 0;
+	color: #FBD796;
+}
+
+#options label {
+	display: block;
+	font-size: 0.85rem;
+	margin-bottom: 2px;
+}
+
+#element-list {
+	max-height: 40vh;
+	overflow-y: auto;
+	font-size: 0.85rem;
+}
+
+#element-list li {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 2px 4px;
+	border-radius: 4px;
+	cursor: pointer;
+}
+
+#element-list li:hover {
+	background-color: #25305a;
+}
+
+#element-list li.selected {
+	background-color: #062E95;
+}
+
+#element-list li.hidden-element .name {
+	text-decoration: line-through;
+	color: #9aa6c8;
+}
+
+.zoom-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 8px;
+}
+
+#stage-scroll {
+	overflow: auto;
+	max-height: calc(100vh - 140px);
+	background:
+		repeating-conic-gradient(#1b2445 0% 25%, #141b36 0% 50%) 50% / 24px 24px;
+	border: 1px solid #25305a;
+	border-radius: 6px;
+}
+
+#stage-wrap {
+	position: relative;
+}
+
+#stage {
+	position: absolute;
+	top: 0;
+	left: 0;
+	transform-origin: 0 0;
+	background-color: rgb(24, 24, 32);
+	outline: none;
+	user-select: none;
+}
+
+#base-layer,
+#top-layer,
+#context-layer,
+#element-layer {
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+	background-repeat: no-repeat;
+}
+
+#stage {
+	overflow: hidden;
+	/* set by the script to 1 / zoom, so outlines, labels and handles keep
+	   a constant on-screen size whatever the canvas scale */
+	--inv: 1;
+}
+
+#top-layer,
+#context-layer {
+	pointer-events: none;
+}
+
+.ctx-box {
+	position: absolute;
+	border: calc(1px * var(--inv)) dashed rgba(255, 255, 255, 0.3);
+	border-radius: 6px;
+}
+
+.ctx-card {
+	position: absolute;
+	border-radius: 12px;
+	background: linear-gradient(#9e45e2, #7232a3);
+}
+
+.el {
+	position: absolute;
+	box-sizing: border-box;
+	border: calc(2px * var(--inv)) solid var(--c);
+	background-color: color-mix(in srgb, var(--c) 18%, transparent);
+	cursor: move;
+	touch-action: none;
+}
+
+.el.follows {
+	border-style: dashed;
+}
+
+.el.hidden-element {
+	display: none;
+}
+
+.el.selected {
+	outline: calc(3px * var(--inv)) solid #fff;
+	outline-offset: calc(1px * var(--inv));
+	z-index: 5;
+}
+
+.el .el-label {
+	position: absolute;
+	left: 0;
+	top: 0;
+	padding: 0 calc(4px * var(--inv));
+	font-size: calc(12px * var(--inv));
+	line-height: 1.4;
+	white-space: nowrap;
+	background-color: rgba(0, 0, 0, 0.75);
+	color: var(--c);
+	pointer-events: none;
+}
+
+.hide-labels .el-label {
+	display: none;
+}
+
+.el .handle {
+	position: absolute;
+	width: calc(12px * var(--inv));
+	height: calc(12px * var(--inv));
+	background-color: #fff;
+	border: calc(1px * var(--inv)) solid #000;
+}
+
+.el .handle[data-dir="e"] {
+	right: calc(-7px * var(--inv));
+	top: calc(50% - 6px * var(--inv));
+	cursor: ew-resize;
+}
+
+.el .handle[data-dir="s"] {
+	bottom: calc(-7px * var(--inv));
+	left: calc(50% - 6px * var(--inv));
+	cursor: ns-resize;
+}
+
+.el .handle[data-dir="se"] {
+	right: calc(-7px * var(--inv));
+	bottom: calc(-7px * var(--inv));
+	cursor: nwse-resize;
+}
+
+.el:not(.selected) .handle {
+	display: none;
+}
+
+#editor .btn-group .btn.active {
+	background-color: #FBD796;
+	border-color: #FBD796;
+	color: #0C152F;
+}
