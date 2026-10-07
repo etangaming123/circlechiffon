@@ -133,6 +133,14 @@ class ChartRenderUnavailable(RuntimeError):
     """skia isn't installed on this host."""
 
 
+def _rgba_surface(skia, arr: np.ndarray):
+    """A canvas drawing into `arr` as RGBA - the byte order ffmpeg is told
+    (`-pix_fmt rgba`). Never skia's default "N32": that's the platform's
+    native order, RGBA on macOS but BGRA on Windows, where it swapped red
+    and blue in every frame."""
+    return skia.Surface(arr, colorType=skia.kRGBA_8888_ColorType)
+
+
 def renderer_available() -> bool:
     try:
         import skia  # noqa: F401
@@ -239,7 +247,7 @@ class Scene:
     def _draw_background(self, rgb) -> np.ndarray:
         skia = self.skia
         arr = np.zeros((self.size, self.size, 4), np.uint8)
-        surface = skia.Surface(arr)
+        surface = _rgba_surface(skia, arr)
         canvas = surface.getCanvas()
         canvas.clear(skia.Color(*rgb))
         self.painter.background(canvas)
@@ -696,7 +704,7 @@ def _render_chunk(job: _ChunkJob) -> int:
 
     scene = _scene_for(job)
     frame = np.zeros((job.size, job.size, 4), np.uint8)
-    surface = skia.Surface(frame)
+    surface = _rgba_surface(skia, frame)
     canvas = surface.getCanvas()
 
     proc = subprocess.Popen(
