@@ -183,7 +183,7 @@ class CustomiseCog(commands.Cog):
             attachments=[discord.File(buf, filename=f"{kind.value}-preview.png")],
         )
 
-    @app_commands.command(name="cc-template-whitelist", description="Manage who can upload custom templates. (Owner only)")
+    @app_commands.command(name="cc-template-whitelist", description="Manage who can use custom templates and render chart videos. (Owner only)")
     @app_commands.describe(action="add, remove or list", user="The user to add or remove")
     @app_commands.choices(
         action=[
@@ -201,7 +201,7 @@ class CustomiseCog(commands.Cog):
 
         if action.value == "list":
             ids = await store.list_whitelist()
-            content = "Template whitelist:\n" + "\n".join(f"- <@{i}> (`{i}`)" for i in ids) if ids else "The template whitelist is empty."
+            content = "Whitelist (custom templates + chart video renders):\n" + "\n".join(f"- <@{i}> (`{i}`)" for i in ids) if ids else "The whitelist is empty."
             await interaction.response.send_message(content=content, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
             return
         if user is None:
@@ -209,15 +209,15 @@ class CustomiseCog(commands.Cog):
             return
         if action.value == "add":
             added = await store.add_to_whitelist(user.id)
-            content = f"Added {user.mention} to the template whitelist." if added else f"{user.mention} is already whitelisted."
+            content = f"Added {user.mention} to the whitelist (custom templates + chart video renders)." if added else f"{user.mention} is already whitelisted."
         else:
             removed = await store.remove_from_whitelist(user.id)
             if not removed:
-                content = f"{user.mention} isn't on the template whitelist."
+                content = f"{user.mention} isn't on the whitelist."
             elif access.is_owner(user.id):
-                content = f"Removed {user.mention} from the template whitelist. The bot owner can always use templates, so nothing changes."
+                content = f"Removed {user.mention} from the whitelist. The bot owner can always use templates and render charts, so nothing changes."
             else:
-                content = f"Removed {user.mention} from the template whitelist. Their uploaded templates stay on disk but are no longer used."
+                content = f"Removed {user.mention} from the whitelist. Their uploaded templates stay on disk but are no longer used, and they can no longer render chart videos."
         await interaction.response.send_message(content=content, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
 

@@ -14,9 +14,11 @@ messages applies.
 A render takes every worker core for several seconds, so renders go through
 a FIFO queue, one at a time, and each user then waits _RENDER_COOLDOWN
 seconds before their next (the owner skips the cooldown, never the queue).
-Who may render at all is `config.chart_render` ("owner" by default, or
-"everyone"); anyone else gets the chart's data as an embed, which costs no
-more than /cc-info does.
+Who may render at all is `config.chart_render`: "owner" (the default) means
+the owner plus whoever is on the whitelist custom templates use
+(`customisation/store.py`, managed with /cc-template-whitelist), and
+"everyone" opens it to all. Anyone else gets the chart's data as an embed,
+which costs no more than /cc-info does.
 
 A long chart comes back as several overlapping videos rather than one
 heavily compressed one (see chart_local._split); the message lists each
@@ -44,6 +46,7 @@ from config import config
 from circlechiffon import access, embed_colors
 from circlechiffon.adapters.dxrating.images import jacket_url
 from circlechiffon.adapters.mainotes.catalog import MaiNotesChart, fetch_chart_text, get_mainotes_catalog
+from circlechiffon.customisation import store
 from circlechiffon.renderers import chart_local, chart_skin
 from circlechiffon.renderers.chart_local import (
     HI_SPEED_DEFAULT,
@@ -127,8 +130,11 @@ class _RenderQueue:
 _queue = _RenderQueue()
 
 
-def _may_render(user_id: int) -> bool:
-    return access.is_owner(user_id) or config.chart_render == "everyone"
+async def _may_render(user_id: int) -> bool:
+    """The owner, anyone at all with `chart_render: "everyone"`, otherwise
+    the same whitelist as custom templates (which counts the owner too)."""
+    return config.chart_render == "everyone" or await store.is_whitelisted(user_id)
+
 
 _DIFFICULTY_CHOICES = [
     app_commands.Choice(name=d.display_name, value=d.value)
@@ -331,13 +337,13 @@ class ChartCog(commands.Cog):
 
             # Those who can't render still get the lookup, which is the same
             # local-manifest work /cc-info does.
-            if not _may_render(user_id):
+            if not await _may_render(user_id):
                 bail()
                 embed.set_footer(text="Chart data from mai-notes.com")
                 await interaction.edit_original_response(
                     content=(
-                        "Rendering chart videos is limited to the bot owner, so here's this "
-                        "chart's data instead."
+                        "Rendering chart videos is limited to whitelisted users - ask the bot owner "
+                        "if you'd like access. Here's this chart's data instead."
                     ),
                     embed=embed,
                 )

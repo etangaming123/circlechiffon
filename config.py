@@ -75,8 +75,9 @@ class Config:
         # explicitly is left untouched.
         raw_db_path = data.get("db_path", "circlechiffon.db")
         self.db_path = raw_db_path if os.path.isabs(raw_db_path) else str(_BASE_DIR / raw_db_path)
-        # Who may render /cc-chart videos: "owner" (the default) or "everyone".
-        # Anyone else still gets the chart lookup.
+        # Who may render /cc-chart videos: "owner" (the default - the owner
+        # plus the /cc-template-whitelist users) or "everyone". Anyone else
+        # still gets the chart lookup.
         self.chart_render = str(data.get("chart_render", "owner")).strip().lower()
         # Where /cc-chart renders: "" renders on this machine, or the base URL
         # of a render_server.py on another one (e.g. "http://192.168.1.50:8765").

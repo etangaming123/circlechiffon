@@ -82,7 +82,8 @@ class CollectionPreset(Base):
 
 class TemplateWhitelist(Base):
     """A Discord user allowed to upload custom render templates (see
-    customisation/store.py). The bot owner is always allowed and never
+    customisation/store.py) and, unless `config.chart_render` is
+    "everyone", to render /cc-chart videos. The bot owner is always allowed and never
     needs a row. The template files themselves live on disk under
     user_templates/, not in the DB; removing a row stops them being used
     but leaves the files in place."""

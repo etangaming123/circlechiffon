@@ -67,13 +67,13 @@ Restyle your `/cc-best`, `/cc-friend-best` and `/cc-profile` images with your ow
 
 ### Charts
 
-* `/cc-chart` — Look up a chart on [mai-notes.com](https://mai-notes.com/): level, constant, note breakdown, charter, top DX score and tags. Can also render the chart as a *video of it playing*, with tap sounds mixed in — in a plain mai-notes style (default), or with a maimai look showing every judgement as CRITICAL PERFECT or MISS. Long charts come as several overlapping videos rather than one blurry one. Renders run one at a time in a queue, with a 30-second cooldown per user; who can render is set by `chart_render` in `config.json` (`"owner"`, the default, or `"everyone"`)
+* `/cc-chart` — Look up a chart on [mai-notes.com](https://mai-notes.com/): level, constant, note breakdown, charter, top DX score and tags. Can also render the chart as a *video of it playing*, with tap sounds mixed in — in a plain mai-notes style (default), or with a maimai look showing every judgement as CRITICAL PERFECT or MISS. Long charts come as several overlapping videos rather than one blurry one. Renders run one at a time in a queue, with a 30-second cooldown per user; rendering is for whitelisted users (the same whitelist as custom templates), or for everyone with `"chart_render": "everyone"` in `config.json`
 
 ### Owner
 
 * `/cc-ping` — Ping the bot
 * `/cc-ban` / `/cc-unban` — Bot-level ban controls
-* `/cc-template-whitelist` — Choose who can upload custom templates
+* `/cc-template-whitelist` — Choose who can upload custom templates and render chart videos
 
 ## Screenshots/Showcase
 
