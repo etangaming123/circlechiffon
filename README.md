@@ -57,6 +57,14 @@ Commands marked 🔗 need a linked SEGA ID account. Everything else works with n
 
 * 🔗 `/cc-preset-save` / `/cc-preset-load` / `/cc-preset-list` / `/cc-preset-delete` — Save your equipped icon, name plate, frame and title to a slot, and re-equip the whole set in one command
 
+### Custom templates (whitelisted users)
+
+Restyle your `/cc-best`, `/cc-friend-best` and `/cc-profile` images with your own art and layout. Lay it out in the [template editor](https://cc.etangaming.xyz/template-editor.html), then upload. See [Custom render templates](./docs/customisation.md).
+
+* `/cc-template-upload` — Upload a base image (under the render), a top image (over it) and/or a `layout.json`
+* `/cc-template-preview` — Render your template with sample data, optionally with the layout guide drawn on
+* `/cc-template-get` / `/cc-template-remove` — Download or remove your current template
+
 ### Charts
 
 * `/cc-chart` — Look up a chart on [mai-notes.com](https://mai-notes.com/): level, constant, note breakdown, charter, top DX score and tags. **For the bot owner only**, renders the chart as a *video of it playing*, with tap sounds mixed in
@@ -65,6 +73,7 @@ Commands marked 🔗 need a linked SEGA ID account. Everything else works with n
 
 * `/cc-ping` — Ping the bot
 * `/cc-ban` / `/cc-unban` — Bot-level ban controls
+* `/cc-template-whitelist` — Choose who can upload custom templates
 
 ## Screenshots/Showcase
 
@@ -132,6 +141,7 @@ Do note that the program has to be continuously running for the bot to work. If 
 
 * [How credential handling works](./docs/credentials.md) — what's stored, what isn't, and how `remember_password` changes that
 * [Known limitations and testing notes](./docs/limitations.md) — what's verified live, what's best-effort, and why friend data is limited
+* [Custom render templates](./docs/customisation.md) — base/top images, the layout editor, and the `layout.json` format
 * [Data credits](./docs/credits.md) — dxrating, chuni-penguin, mai-notes and the bundled fonts
 
 The bot will automatically create new image templates in `./templates`, so you can edit them to your liking.

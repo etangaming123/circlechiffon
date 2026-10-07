@@ -10,6 +10,7 @@ from circlechiffon import access, accounts
 from circlechiffon.adapters.maimai_net.badge_icons import get_all_badge_icons
 from circlechiffon.adapters.maimai_net.errors import MaimaiNetError, SessionExpired
 from circlechiffon.adapters.maimai_net.parser import parse_profile, parse_profile_extras
+from circlechiffon.customisation.store import get_user_template
 from circlechiffon.renderers.display import render_display
 from circlechiffon.renderers.profile import render_profile_core, render_profile_extras
 
@@ -92,6 +93,7 @@ class ProfileCog(commands.Cog):
             return
 
         await interaction.edit_original_response(content="Rendering...")
+        template = await get_user_template(interaction.user.id, "profile_extra" if result[0] == "extra" else "profile_core")
         buf = io.BytesIO()
         if result[0] == "extra":
             _, profile, extras, icon_bytes, ticket_bytes = result
@@ -102,6 +104,7 @@ class ProfileCog(commands.Cog):
                 icon_bytes=icon_bytes,
                 ticket_image_bytes=ticket_bytes,
                 output=buf,
+                template=template,
             )
         else:
             _, profile, icon_bytes, course_rank_bytes, class_rank_bytes, rating_badge_bytes, badge_icons = result
@@ -114,6 +117,7 @@ class ProfileCog(commands.Cog):
                 rating_badge_bytes=rating_badge_bytes,
                 badge_icons=badge_icons,
                 output=buf,
+                template=template,
             )
 
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")

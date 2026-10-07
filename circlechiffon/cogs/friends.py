@@ -17,6 +17,7 @@ from circlechiffon.adapters.maimai_site.version_logo import get_version_logo
 from circlechiffon.adapters.maimai_net.errors import MaimaiNetError, SessionExpired
 from circlechiffon.ratingcalc.best50 import calculate_best50
 from circlechiffon.ratingcalc.calculator import rank_tag_for_achievement
+from circlechiffon.customisation.store import get_user_template
 from circlechiffon.renderers.b50 import render_b50
 from circlechiffon.renderers.profile import render_friend_profile
 from circlechiffon.songdata.catalog import get_catalog
@@ -749,6 +750,8 @@ class FriendsCog(commands.Cog):
             }
             badge_icons = await get_all_badge_icons()
             version_logo_bytes = await get_version_logo()
+            # the caller's own template, not the friend's - it's their view
+            template = await get_user_template(interaction.user.id, "b50")
 
             b15_versions = [v for v in (catalog.current_version, catalog.previous_version) if v is not None]
             b15_version_label = " and ".join(b15_versions) if b15_versions else "CURRENT VERSION"
@@ -767,6 +770,7 @@ class FriendsCog(commands.Cog):
                 badge_icons=badge_icons,
                 version_logo_bytes=version_logo_bytes,
                 output=buf,
+                template=template,
             )
 
             elapsed = time.monotonic() - start_time
