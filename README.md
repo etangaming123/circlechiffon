@@ -114,7 +114,7 @@ The "game" render modes draw notes with a [MajdataPlay](https://github.com/LingF
 python import_chart_skin.py /path/to/MajdataPlay --skin Deluxe
 ```
 
-It copies the skin into `assets/chart_skin/` (gitignored) and extracts MajdataPlay's slide layouts. Without it, the game modes fall back to the mai-notes style.
+It copies the skin and MajdataPlay's tap sound into `assets/chart_skin/` (gitignored) and extracts MajdataPlay's slide layouts. Without it, the game modes fall back to the mai-notes style and sounds.
 
 ffmpeg and `skia-python` are checked at runtime. Without them `/cc-chart` still answers, it just replies with the chart's stats instead of a video; every other command is unaffected.
 

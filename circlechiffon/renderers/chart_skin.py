@@ -54,11 +54,18 @@ _HIT_STARS = (
 )
 # Firework rays cycle the note palette: each yellow, touch blue, tap magenta.
 _FIREWORK_COLORS = ((255, 215, 0), (0, 191, 255), (255, 64, 200))
+_FIREWORK_SECONDS = 0.6
 
 
 def skin_dir() -> Path:
     configured = os.environ.get("CC_CHART_SKIN_DIR")
     return Path(configured) if configured else DEFAULT_SKIN_DIR
+
+
+def game_hit_sound(path: Path | None = None) -> Path | None:
+    """maimai's own tap sound (MajdataPlay's SFX/answer.wav), if imported."""
+    sound = (path or skin_dir()) / "SFX" / "answer.wav"
+    return sound if sound.is_file() else None
 
 
 def skin_installed(path: Path | None = None) -> bool:
@@ -436,22 +443,27 @@ class SkinPainter:
             self.sprite(canvas, img, world, alpha=alpha)
 
     def firework(self, canvas, pos, since):
-        """Firework_new.png is white rays; tint them in turn with the note
-        colours by painting a hard-stop sweep gradient over the sprite."""
-        if since > 0.6:
+        """Firework_new.png is 24 white rays. Drawn large, thickened by
+        stamping it three times a few degrees apart, then tinted ray by ray
+        with the note colours (a hard-stop sweep gradient over it, kSrcIn)."""
+        if since > _FIREWORK_SECONDS:
             return
-        f = since / 0.6
+        f = since / _FIREWORK_SECONDS
         img = self.skin.get("fx/Firework_new")
         if img is None:
             return
         skia = self.skia
-        world = self.frame(pos, 0.0, 0.25 + 0.6 * f)
+        scale = 0.4 + 0.9 * f
         c = self.px @ np.array([pos[0], pos[1], 1.0])
         cx, cy = float(c[0]), float(c[1])
-        r = img.width() * (0.25 + 0.6 * f) / 2 + 2
-        canvas.saveLayer(skia.Rect.MakeLTRB(cx - r, cy - r, cx + r, cy + r))
-        self.sprite(canvas, img, world, alpha=0.55 * (1.0 - f) ** 2)
-        canvas.drawRect(skia.Rect.MakeLTRB(cx - r, cy - r, cx + r, cy + r), self._firework_paint(cx, cy))
+        r = img.width() * scale / 2 + 2
+        bounds = skia.Rect.MakeLTRB(cx - r, cy - r, cx + r, cy + r)
+        layer = skia.Paint()
+        layer.setAlphaf(0.75 * (1.0 - f) ** 2)
+        canvas.saveLayer(bounds, layer)
+        for spread in (-2.5, 0.0, 2.5):  # each ray 7.5deg wide -> 12.5deg
+            self.sprite(canvas, img, self.frame(pos, spread, scale))
+        canvas.drawRect(bounds, self._firework_paint(cx, cy))
         canvas.restore()
 
     def _firework_paint(self, cx, cy):

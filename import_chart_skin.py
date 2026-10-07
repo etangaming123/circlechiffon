@@ -3,8 +3,9 @@ Import a MajdataPlay note skin for /cc-chart's local renderer.
 
     python import_chart_skin.py <path to MajdataPlay checkout> [--skin Deluxe]
 
-Copies the skin's PNGs, a few of MajdataPlay's effect sprites, and extracts
-every slide shape's arrow layout from MajdataPlay's slide prefabs into
+Copies the skin's PNGs, a few of MajdataPlay's effect sprites and its tap
+hit sound (used by the "game" render mode), and extracts every slide shape's
+arrow layout from MajdataPlay's slide prefabs into
 `assets/chart_skin/slides.json`.
 
 **Nothing this writes may be committed.** MajdataPlay is GPL-3.0 and its
@@ -35,6 +36,7 @@ _EFFECT_SPRITES = (
     "Sprites/Game/CircleMask.png",
     "Sprites/Game/Firework_new.png",
 )
+_SOUNDS = ("StreamingAssets/SFX/answer.wav",)
 
 # NoteLoader.cs SLIDE_PREFAB_MAP: shape name -> index into Game.unity's
 # `slidePrefab` array. ("Ex" is the extended-slide prefab; not a shape.)
@@ -224,6 +226,14 @@ def main() -> int:
             copied += 1
         else:
             print(f"warning: missing effect sprite {rel}", file=sys.stderr)
+    (OUT_DIR / "SFX").mkdir()
+    for rel in _SOUNDS:
+        src = assets / rel
+        if src.exists():
+            shutil.copy2(src, OUT_DIR / "SFX" / src.name)
+            copied += 1
+        else:
+            print(f"warning: missing sound {rel} (game mode will use mai-notes' tap sound)", file=sys.stderr)
 
     (OUT_DIR / "slides.json").write_text(json.dumps(slides, indent=1), encoding="utf-8")
     (OUT_DIR / "SOURCE.txt").write_text(
@@ -233,7 +243,7 @@ def main() -> int:
     )
 
     counts = {k: len(v["arrows"]) for k, v in slides["shapes"].items()}
-    print(f"Copied {copied} images, extracted {len(counts)} slide shapes into {OUT_DIR}")
+    print(f"Copied {copied} files, extracted {len(counts)} slide shapes into {OUT_DIR}")
     print("  " + ", ".join(f"{k}:{n}" for k, n in counts.items()))
     return 0
 

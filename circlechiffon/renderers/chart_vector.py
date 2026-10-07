@@ -36,8 +36,6 @@ TOUCH = {"normal": ((0, 191, 255), (0, 112, 255)), "each": ((255, 215, 0), (255,
 TOUCH_HOLD = ((255, 107, 107), (255, 230, 109), (46, 204, 113), (52, 152, 219))
 WHITE = (255, 255, 255)
 GREY = (128, 128, 128)
-# Firework rays cycle the note palette: each yellow, touch blue, tap magenta.
-FIREWORK = ((255, 215, 0), (0, 191, 255), (255, 64, 200))
 
 
 class VectorPainter:
@@ -390,15 +388,14 @@ class VectorPainter:
         canvas.drawCircle(x, y, r, self._stroke(WHITE, self.line * 1.5, 1.0 - f))
 
     def firework(self, canvas, pos, since):
-        """Rays bursting out of the sensor, cycling the note colours."""
+        """A faint ring of thin white rays - mai-notes has no firework
+        effect at all, so simple mode keeps it subtle."""
         if since > 0.6:
             return
         f = since / 0.6
         x, y = self.xy(pos)
-        alpha = 0.8 * (1 - f) ** 2
-        r0, r1 = self.R * (0.05 + 0.25 * f), self.R * (0.15 + 0.85 * f)
-        width = self.R * 0.035 * (1 - 0.5 * f)
+        r0, r1 = self.R * (0.05 + 0.3 * f), self.R * (0.15 + 0.85 * f)
+        p = self._stroke(WHITE, self.line * 0.75, 0.35 * (1 - f) ** 2)
         for k in range(24):
             a = math.radians(k * 15)
-            p = self._stroke(FIREWORK[k % 3], width, alpha)
             canvas.drawLine(x + math.cos(a) * r0, y + math.sin(a) * r0, x + math.cos(a) * r1, y + math.sin(a) * r1, p)

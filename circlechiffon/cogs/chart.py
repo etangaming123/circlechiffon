@@ -28,6 +28,7 @@ import contextlib
 import io
 import re
 import tempfile
+import time
 import unicodedata
 from pathlib import Path
 
@@ -40,7 +41,7 @@ from config import config
 from circlechiffon import access, embed_colors
 from circlechiffon.adapters.dxrating.images import jacket_url
 from circlechiffon.adapters.mainotes.catalog import MaiNotesChart, fetch_chart_text, get_mainotes_catalog
-from circlechiffon.renderers import chart_local
+from circlechiffon.renderers import chart_local, chart_skin
 from circlechiffon.renderers.chart_local import (
     HI_SPEED_DEFAULT,
     HI_SPEED_MAX,
@@ -446,6 +447,10 @@ class ChartCog(commands.Cog):
                 return False
 
             captures = []
+            started = time.perf_counter()
+            # "game" plays maimai's own tap sound when the skin import
+            # brought it along; everything else keeps mai-notes' pair.
+            hit_sound = chart_skin.game_hit_sound() if render_mode == MODE_GAME or render_mode == MODE_MISS else None
             try:
                 captures = await render_chart(
                     chart_text, raw,
@@ -465,8 +470,9 @@ class ChartCog(commands.Cog):
                     out = tmp_dir / f"chart-{k}.mp4"
                     # Note times come straight from the chart, so no capture
                     # latency correction applies.
-                    await encode_capture(capture, out, size_limit=limit, sfx_shift_ms=0)
+                    await encode_capture(capture, out, size_limit=limit, sfx_shift_ms=0, hit_sound=hit_sound)
                     outs.append(out)
+                render_seconds = time.perf_counter() - started
             except ChartRenderUnavailable as e:
                 await progress.stop()
                 bail()
@@ -493,6 +499,7 @@ class ChartCog(commands.Cog):
             _RENDER_MODE_LABELS.get(render_mode, render_mode),
             f"{last.start_seconds + last.duration_seconds - first.start_seconds:.0f}s",
             f"measures {first.start_measure}-{last.end_measure}/{first.total_measures}",
+            f"rendered in {render_seconds:.1f}s",
             "chart data from mai-notes.com",
         ]
         embed.set_footer(text=" · ".join(footer))

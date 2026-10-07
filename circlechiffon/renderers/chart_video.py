@@ -221,13 +221,16 @@ async def encode_capture(
     with_audio: bool = True,
     size_limit: int = SIZE_BUDGET,
     sfx_shift_ms: float = SFX_SHIFT_MS,
+    hit_sound: Path | None = None,
 ) -> Path:
-    """Captured stream (+ rebuilt SFX) -> an mp4 under Discord's limit."""
+    """Captured stream (+ rebuilt SFX) -> an mp4 under Discord's limit.
+    `hit_sound` replaces mai-notes' two tap samples with one wav used for
+    every hit, simultaneous or not (the game sounds one tap either way)."""
     ffmpeg = ffmpeg_path()
 
     audio: Path | None = None
     if with_audio and capture.sfx:
-        samples = await _ensure_sfx_samples()
+        samples = (hit_sound, hit_sound) if hit_sound is not None else await _ensure_sfx_samples()
         if samples is not None:
             audio = out_path.with_name(out_path.stem + "-sfx.wav")
             try:

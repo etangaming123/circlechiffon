@@ -373,6 +373,16 @@ class Scene:
         hits.sort(key=lambda h: h[0])
         self.hits = hits
         self.hit_times = np.array([h[0] for h in hits])
+        # One burst per button/sensor: a newer hit in the same spot cuts the
+        # previous one off rather than drawing over it (as MajdataPlay's one
+        # effect object per button does).
+        self.hit_until = np.full(len(hits), np.inf)
+        last: dict[tuple, int] = {}
+        for k, (when, pos, _, touch) in enumerate(hits):
+            spot = (touch, round(float(pos[0]), 3), round(float(pos[1]), 3))
+            if spot in last:
+                self.hit_until[last[spot]] = when
+            last[spot] = k
         self.fireworks = fireworks
 
     # -- per frame --------------------------------------------------------------
@@ -602,6 +612,8 @@ class Scene:
     def _draw_effects(self, canvas, t: float) -> None:
         painter = self.painter
         for k in self._recent(self.hit_times, t, 0.45):
+            if t >= self.hit_until[k]:
+                continue
             when, pos, rot, touch = self.hits[k]
             painter.hit(canvas, pos, rot, t - when, touch)
         for when, pos in self.fireworks:
