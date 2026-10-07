@@ -69,6 +69,24 @@ def merge_opacities(defaults: dict | None, user: dict | None) -> dict[str, float
     return opacities
 
 
+def merge_widths(defaults: dict | None, user: dict | None) -> dict[str, float]:
+    """Width slots (px): the defaults' `widths` with the user's finite
+    0..OUTLINE_WIDTH_MAX numbers laid over the slots the defaults know.
+    Anything else is silently ignored here."""
+    widths = {slot: float(value) for slot, value in (defaults or {}).items()}
+    if isinstance(user, dict):
+        for slot, value in user.items():
+            if (
+                slot in widths
+                and isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and math.isfinite(value)
+                and 0 <= value <= OUTLINE_WIDTH_MAX
+            ):
+                widths[slot] = float(value)
+    return widths
+
+
 @contextmanager
 def opacity(img: Image.Image, opacity: float, region: tuple[int, int, int, int]):
     """Whatever is drawn onto `img` inside the block lands at `opacity`.
@@ -161,10 +179,11 @@ class Layout:
     (e.g. the rating badge after a variable-width name) can sit right
     after it - elements must be drawn in follow order."""
 
-    def __init__(self, elements: dict, defaults: dict, options: dict, card: "Layout | None" = None, colors: dict | None = None, opacities: dict | None = None):
+    def __init__(self, elements: dict, defaults: dict, options: dict, card: "Layout | None" = None, colors: dict | None = None, opacities: dict | None = None, widths: dict | None = None):
         self._elements = elements
         self.colors = colors or {}
         self.opacities = opacities or {}
+        self.widths = widths or {}
         self._defaults = defaults
         self.options = options
         self.card = card
@@ -189,7 +208,8 @@ class Layout:
             card = cls(_merge_elements(card_defaults, user_card, scale), card_defaults, {})
         colors = merge_colors(defaults.get("colors"), user.get("colors"))
         opacities = merge_opacities(defaults.get("opacities"), user.get("opacities"))
-        return cls(_merge_elements(defaults["elements"], user.get("elements"), scale), defaults["elements"], options, card, colors, opacities)
+        widths = merge_widths(defaults.get("widths"), user.get("widths"))
+        return cls(_merge_elements(defaults["elements"], user.get("elements"), scale), defaults["elements"], options, card, colors, opacities, widths)
 
     def reset_drawn(self) -> None:
         self._drawn_right.clear()
@@ -252,6 +272,11 @@ class Layout:
         """A layout-level opacity slot (default overlaid by the user's
         `opacities`), 0..1."""
         return self.opacities[slot]
+
+    def width_slot(self, slot: str) -> float:
+        """A layout-level width slot (default overlaid by the user's
+        `widths`), in px at the default canvas scale."""
+        return self.widths[slot]
 
     def raw(self, name: str) -> dict:
         return self._elements[name]

@@ -265,6 +265,7 @@ window.CC_TEMPLATE_KINDS = {
    "divider": "Divider line"
   },
   "opacityLabels": {},
+  "widthLabels": {},
   "grid": {
    "cell": [
     600,
@@ -502,7 +503,11 @@ window.CC_TEMPLATE_KINDS = {
    "colors": {
     "pill_border": "#0e76b2",
     "pill_fill": "#48bfee",
-    "pill_text": "#0d375c"
+    "pill_text": "#0d375c",
+    "pill_text_outline": "#141414"
+   },
+   "widths": {
+    "pill_text_outline_width": 0
    },
    "opacities": {
     "pill_background": 1.0,
@@ -551,12 +556,16 @@ window.CC_TEMPLATE_KINDS = {
   "colorLabels": {
    "pill_border": "Count pill border",
    "pill_fill": "Count pill fill",
-   "pill_text": "Count pill text"
+   "pill_text": "Count pill text",
+   "pill_text_outline": "Count text outline"
   },
   "opacityLabels": {
    "pill_background": "Count pill background",
    "pill_icon": "Count tier icon",
    "pill_text": "Count text"
+  },
+  "widthLabels": {
+   "pill_text_outline_width": "Count text outline width"
   }
  },
  "profile_extra": {
@@ -670,6 +679,7 @@ window.CC_TEMPLATE_KINDS = {
    "mission_accent": "Mission accent (gold)",
    "mission_text": "Pending mission text"
   },
-  "opacityLabels": {}
+  "opacityLabels": {},
+  "widthLabels": {}
  }
 };

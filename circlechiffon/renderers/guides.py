@@ -41,6 +41,8 @@ class TemplateKind:
     color_labels: dict[str, str] | None = None
     # layout-level opacity slots (layout.json `opacities`) -> editor label
     opacity_labels: dict[str, str] | None = None
+    # layout-level width slots (layout.json `widths`, px) -> editor label
+    width_labels: dict[str, str] | None = None
 
 
 TEMPLATE_KINDS: dict[str, TemplateKind] = {
@@ -53,6 +55,7 @@ TEMPLATE_KINDS: dict[str, TemplateKind] = {
     "profile_core": TemplateKind(
         "profile_core", "Profile core (/cc-profile)", profile.default_core_layout, profile.CORE_LABELS,
         color_labels=profile.CORE_COLOR_LABELS, opacity_labels=profile.CORE_OPACITY_LABELS,
+        width_labels=profile.CORE_WIDTH_LABELS,
     ),
     "profile_extra": TemplateKind(
         "profile_extra", "Profile extra (/cc-profile view:extra)", profile.default_extras_layout, profile.EXTRAS_LABELS,
@@ -81,6 +84,7 @@ def editor_defaults() -> dict:
             "cardTextElements": sorted(spec.card_text_elements),
             "colorLabels": spec.color_labels or {},
             "opacityLabels": spec.opacity_labels or {},
+            "widthLabels": spec.width_labels or {},
         }
         for key, spec in TEMPLATE_KINDS.items()
     }

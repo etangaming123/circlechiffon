@@ -155,6 +155,12 @@
 				if (typeof v === "number" && isFinite(v)) defaults.opacities[slot] = Math.min(1, Math.max(0, v));
 			}
 		}
+		if (defaults.widths && incoming.widths && typeof incoming.widths === "object") {
+			for (const slot of Object.keys(defaults.widths)) {
+				const v = incoming.widths[slot];
+				if (typeof v === "number" && isFinite(v)) defaults.widths[slot] = Math.min(MAX_OUTLINE, Math.max(0, v));
+			}
+		}
 		if (incoming.options && typeof incoming.options === "object") {
 			for (const key of Object.keys(defaults.options || {})) {
 				if (typeof incoming.options[key] === "boolean") defaults.options[key] = incoming.options[key];
@@ -618,6 +624,7 @@
 		};
 		if (l.colors) out.colors = l.colors;
 		if (l.opacities) out.opacities = l.opacities;
+		if (l.widths) out.widths = l.widths;
 		if (l.card) out.card = { elements: l.card.elements };
 		const blob = new Blob([JSON.stringify(out, null, 1)], { type: "application/json" });
 		const a = document.createElement("a");
@@ -682,7 +689,11 @@
 		const slots = spec().colorLabels || {};
 		const names = Object.keys(slots);
 		const opacityLabels = spec().opacityLabels || {};
-		els.colorsPanel.classList.toggle("d-none", !names.length && !Object.keys(opacityLabels).length);
+		const widthLabels = spec().widthLabels || {};
+		els.colorsPanel.classList.toggle(
+			"d-none",
+			!names.length && !Object.keys(opacityLabels).length && !Object.keys(widthLabels).length
+		);
 		const current = layout().colors || {};
 		const stock = spec().defaults.colors || {};
 		for (const slot of names) {
@@ -732,6 +743,32 @@
 			input.addEventListener("input", () => {
 				layout().opacities[slot] = input.value / 100;
 				show(input.value / 100);
+				save();
+			});
+			row.append(label, input);
+			els.colors.appendChild(row);
+		}
+
+		// layout-wide pixel widths (e.g. count text outline)
+		const widths = layout().widths || {};
+		for (const slot of Object.keys(widthLabels)) {
+			const row = document.createElement("div");
+			row.className = "opacity-row";
+			const label = document.createElement("label");
+			const value = document.createElement("span");
+			const show = (v) => (value.textContent = Number(v) === 0 ? "none" : v + "px");
+			label.append(widthLabels[slot] + " ", value);
+			const input = document.createElement("input");
+			input.type = "range";
+			input.className = "custom-range";
+			input.min = "0";
+			input.max = "12";
+			input.step = "0.5";
+			input.value = String(widths[slot] == null ? 0 : widths[slot]);
+			show(input.value);
+			input.addEventListener("input", () => {
+				layout().widths[slot] = Number(input.value);
+				show(input.value);
 				save();
 			});
 			row.append(label, input);

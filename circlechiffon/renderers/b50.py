@@ -441,6 +441,10 @@ def _pad_box(b: Box, pad: int) -> tuple[int, int, int, int]:
     return (b.x - pad, b.y - pad, b.right + pad, b.bottom + pad)
 
 
+def _luma(rgb: tuple[int, int, int]) -> float:
+    return 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]
+
+
 def _draw_text(
     draw: ImageDraw.ImageDraw,
     style: dict,
@@ -461,8 +465,15 @@ def _draw_text(
         fill = style["color"]
     if style["outline_color"] is not None:
         stroke_fill = style["outline_color"]
+    else:
+        # a default stroke that matches the fill erases the text (black
+        # text on a remaster card + the default black stroke = a blob), so
+        # flip it to the opposite extreme
+        if abs(_luma(fill) - _luma(stroke_fill)) < 90:
+            stroke_fill = (255, 255, 255) if _luma(fill) < 128 else (0, 0, 0)
     if style["outline_width"] is not None:
-        stroke_width = max(0, round(style["outline_width"]))
+        # capped so a shrunk (fit-to-box) font can't be swallowed whole
+        stroke_width = max(0, min(round(style["outline_width"]), round(font.size / 6)))
     kwargs = {"stroke_width": stroke_width, "stroke_fill": stroke_fill} if stroke_width > 0 else {}
     draw.text(xy, text, font=font, fill=fill, anchor=anchor, **kwargs)
 

@@ -74,6 +74,7 @@ CANVAS_HEIGHT_CORE = HEADER_HEIGHT_CORE + GRID_HEIGHT + FOOTER_HEIGHT
 _PILL_BORDER_COLOR = (14, 118, 178)
 _PILL_FILL_COLOR = (72, 191, 238)
 _PILL_TEXT_COLOR = (13, 55, 92)
+_PILL_OUTLINE_COLOR = (20, 20, 20)
 
 # profile extra's stock colours - the layout-level colour slots default to
 # these (see default_extras_layout)
@@ -184,6 +185,8 @@ def _draw_count_pill(
     text_color: tuple[int, int, int] = _PILL_TEXT_COLOR,
     background_opacity: float = 1.0,
     text_opacity: float = 1.0,
+    outline_color: tuple[int, int, int] | None = None,
+    outline_width: int = 0,
 ) -> None:
     """Light-blue rounded "pill" holding a right-aligned count, matching the
     real playerData page's own music-count rows (a colored tier badge next
@@ -207,10 +210,17 @@ def _draw_count_pill(
     pos = (x + w - 14 - text_w, y + (h - text_h) / 2 - bbox[1])
     text_region = (pos[0] - 3, y, x + w + 1, y + h + 1)
     with _opacity(image, text_opacity, text_region):
-        if background:
-            draw.text(pos, text, font=font, fill=text_color)
-        else:
-            draw.text(pos, text, font=font, fill=(255, 255, 255), stroke_width=2, stroke_fill=(20, 20, 20))
+        # Resolving the text style (done by the caller, passed in as
+        # text_color / outline_color / outline_width): with the background
+        # on, it is exactly the slot values. With it off, the stock look is
+        # white text + a 2px (20,20,20) outline, kept as-is while pill_text,
+        # pill_text_outline and pill_text_outline_width are all still at
+        # their stock slot values; any the user changed apply per property,
+        # and the untouched ones keep that white/(20,20,20)/2 fallback.
+        draw.text(
+            pos, text, font=font, fill=text_color,
+            stroke_width=outline_width, stroke_fill=outline_color or _PILL_OUTLINE_COLOR,
+        )
 
 
 # element names for the 21 music-count rows, e.g. "row_combo_ap" - one
@@ -255,7 +265,9 @@ def default_core_layout() -> dict:
             "pill_border": _rgb_hex(_PILL_BORDER_COLOR),
             "pill_fill": _rgb_hex(_PILL_FILL_COLOR),
             "pill_text": _rgb_hex(_PILL_TEXT_COLOR),
+            "pill_text_outline": _rgb_hex(_PILL_OUTLINE_COLOR),
         },
+        "widths": {"pill_text_outline_width": 0},
         "opacities": {"pill_background": 1.0, "pill_icon": 1.0, "pill_text": 1.0},
         "options": {"count_pill_background": True},
     }
@@ -273,7 +285,10 @@ CORE_COLOR_LABELS = {
     "pill_border": "Count pill border",
     "pill_fill": "Count pill fill",
     "pill_text": "Count pill text",
+    "pill_text_outline": "Count text outline",
 }
+
+CORE_WIDTH_LABELS = {"pill_text_outline_width": "Count text outline width"}
 
 CORE_OPACITY_LABELS = {
     "pill_background": "Count pill background",
@@ -469,10 +484,23 @@ def render_profile_core(
                 )
             pill_x = box.x + icon_box_w + round(GRID_ICON_PILL_GAP * s)
             count_text = f"{entry.earned:,}/{entry.total:,}" if entry.earned is not None and entry.total is not None else "-"
+            text_color = layout.color("pill_text")
+            outline_color = layout.color("pill_text_outline")
+            outline_width = layout.width_slot("pill_text_outline_width") * s
+            if not pill_background:
+                # see _draw_count_pill: per-property white/(20,20,20)/2 fallback
+                stock = default_core_layout()
+                if layout.colors["pill_text"] == stock["colors"]["pill_text"]:
+                    text_color = (255, 255, 255)
+                if layout.colors["pill_text_outline"] == stock["colors"]["pill_text_outline"]:
+                    outline_color = _PILL_OUTLINE_COLOR
+                if layout.widths["pill_text_outline_width"] == stock["widths"]["pill_text_outline_width"]:
+                    outline_width = 2
             _draw_count_pill(
                 image, draw, pill_x, box.y, box.right - pill_x, box.h, count_text, font(_INTER_BOLD, round(17 * s)),
                 background=pill_background,
-                border_color=layout.color("pill_border"), fill_color=layout.color("pill_fill"), text_color=layout.color("pill_text"),
+                border_color=layout.color("pill_border"), fill_color=layout.color("pill_fill"), text_color=text_color,
+                outline_color=outline_color, outline_width=max(0, round(outline_width)),
                 background_opacity=layout.opacity_slot("pill_background"), text_opacity=layout.opacity_slot("pill_text"),
             )
 
