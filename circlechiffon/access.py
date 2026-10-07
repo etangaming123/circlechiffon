@@ -21,10 +21,9 @@ MAIMAI_NET_HEAVY_COOLDOWN = 120
 # Applying a collection preset: one GET per equippable slot to re-mint the
 # single-use idx, plus a POST for each slot that actually changes.
 COLLECTION_WRITE_COOLDOWN = 45
-# Note: there is deliberately no render tier for /cc-chart's video render,
-# heavy though it is. Rendering is owner-only, and handle_command_access
-# exempts the owner from cooldowns entirely, so such a tier could never
-# fire - the render is bounded by cogs/chart.py's semaphore instead.
+# /cc-chart's video render has its own cooldown (cogs/chart.py), set when a
+# render *finishes* rather than up front, under a key of its own - the
+# command's lookup still runs on DEFAULT_COOLDOWN.
 DEFAULT_COOLDOWN = 5  # everything else
 
 _cooldowns: dict[int, dict[str, float]] = {}
@@ -62,6 +61,18 @@ def _check_cooldown(discord_id: int, command_name: str) -> float | None:
 
 def _set_cooldown(discord_id: int, command_name: str, seconds: int) -> None:
     _cooldowns.setdefault(discord_id, {})[command_name] = time.time() + seconds
+
+
+def cooldown_until(discord_id: int, key: str) -> float | None:
+    """When `key`'s cooldown runs out for this user (a unix timestamp), or
+    None if it isn't running. For cooldowns a command sets itself."""
+    return _check_cooldown(discord_id, key)
+
+
+def set_cooldown(discord_id: int, key: str, seconds: int) -> None:
+    """Starts a cooldown outside handle_command_access - for one that should
+    run from when the work finishes, not from when the command was used."""
+    _set_cooldown(discord_id, key, seconds)
 
 
 def clear_cooldown(discord_id: int, command_name: str) -> None:

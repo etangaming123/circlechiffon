@@ -13,7 +13,20 @@ _DEFAULTS = {
     "token": "your bot token here",
     "owner_id": "your discord user id here (optional, for admin commands)",
     "db_path": "circlechiffon.db",
+    "chart_render": "owner",
+    "chart_render_server": "",
+    "chart_render_key": "",
 }
+
+
+def _resolve_secret(stored: str) -> tuple[str, str | None]:
+    """(plaintext, ciphertext to write back or None) for a value kept
+    encrypted at rest. A value that isn't ciphertext yet is plaintext the
+    user just typed in: it gets encrypted on this load."""
+    try:
+        return crypto_utils.resolve_and_upgrade(stored)
+    except Exception:
+        return stored, crypto_utils.encrypt_value(stored)
 
 
 def _ensure_config_file():
@@ -36,19 +49,23 @@ class Config:
         _ensure_config_file()
         data = _load_raw()
 
-        stored_token = data.get("token", _DEFAULTS["token"])
-        try:
-            plaintext, updated = crypto_utils.resolve_and_upgrade(stored_token)
-        except Exception:
-            # not valid ciphertext yet -> treat as plaintext and encrypt at rest
-            plaintext = stored_token
-            updated = crypto_utils.encrypt_value(plaintext)
-
+        plaintext, updated = _resolve_secret(data.get("token", _DEFAULTS["token"]))
         if updated is not None:
             data["token"] = updated
             with open(CONFIG_PATH, "w") as f:
                 json.dump(data, f, indent=4)
             print(f"Encrypted bot token at rest in {CONFIG_PATH}.")
+
+        # The shared secret for the remote chart renderer (render_server.py),
+        # encrypted at rest like the token. Empty means no remote renderer.
+        render_key = str(data.get("chart_render_key", "") or "")
+        if render_key:
+            render_key, updated = _resolve_secret(render_key)
+            if updated is not None:
+                data["chart_render_key"] = updated
+                with open(CONFIG_PATH, "w") as f:
+                    json.dump(data, f, indent=4)
+                print(f"Encrypted chart_render_key at rest in {CONFIG_PATH}.")
 
         self.token = plaintext
         self.owner_id = data.get("owner_id")
@@ -58,6 +75,15 @@ class Config:
         # explicitly is left untouched.
         raw_db_path = data.get("db_path", "circlechiffon.db")
         self.db_path = raw_db_path if os.path.isabs(raw_db_path) else str(_BASE_DIR / raw_db_path)
+        # Who may render /cc-chart videos: "owner" (the default - the owner
+        # plus the /cc-template-whitelist users) or "everyone". Anyone else
+        # still gets the chart lookup.
+        self.chart_render = str(data.get("chart_render", "owner")).strip().lower()
+        # Where /cc-chart renders: "" renders on this machine, or the base URL
+        # of a render_server.py on another one (e.g. "http://192.168.1.50:8765").
+        # If that server can't be reached, renders fall back to this machine.
+        self.chart_render_server = str(data.get("chart_render_server", "") or "").strip().rstrip("/")
+        self.chart_render_key = render_key
 
 
 config = Config()

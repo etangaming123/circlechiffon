@@ -20,7 +20,7 @@ A template has up to three parts, and each one is optional:
 
 ## Workflow
 
-1. The bot owner whitelists you with `/cc-template-whitelist action:add`.
+1. The bot owner whitelists you with `/cc-template-whitelist action:add`. (The same whitelist also lets you render `/cc-chart` videos.)
 2. Run `/cc-template-get` to get a **guide PNG**: a transparent image at the real canvas size, with every element outlined and labelled. Design your base and top art over it in any image editor.
 3. Open the [template editor](https://cc.etangaming.xyz/template-editor.html) and load your images. Drag elements around, resize them with the handles, hide what you don't want, then click **Export layout.json**. The editor runs entirely in your browser, and nothing you load into it is uploaded.
 4. `/cc-template-upload kind:<…> base:<file> top:<file> layout:<file>` (attach any subset of the three).

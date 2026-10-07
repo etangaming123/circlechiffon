@@ -67,13 +67,13 @@ Restyle your `/cc-best`, `/cc-friend-best` and `/cc-profile` images with your ow
 
 ### Charts
 
-* `/cc-chart` — Look up a chart on [mai-notes.com](https://mai-notes.com/): level, constant, note breakdown, charter, top DX score and tags. **For the bot owner only**, renders the chart as a *video of it playing*, with tap sounds mixed in
+* `/cc-chart` — Look up a chart on [mai-notes.com](https://mai-notes.com/): level, constant, note breakdown, charter, top DX score and tags. Can also render the chart as a *video of it playing*, with tap sounds mixed in — in a plain mai-notes style (default), or with a maimai look showing every judgement as CRITICAL PERFECT or MISS. Long charts come as several overlapping videos rather than one blurry one. Renders run one at a time in a queue, with a 30-second cooldown per user; rendering is for whitelisted users (the same whitelist as custom templates), or for everyone with `"chart_render": "everyone"` in `config.json`
 
 ### Owner
 
 * `/cc-ping` — Ping the bot
 * `/cc-ban` / `/cc-unban` — Bot-level ban controls
-* `/cc-template-whitelist` — Choose who can upload custom templates
+* `/cc-template-whitelist` — Choose who can upload custom templates and render chart videos
 
 ## Screenshots/Showcase
 
@@ -96,7 +96,7 @@ Do note that if you lack the "External Apps" permission in servers, you will sti
 The following are optional, but recommended:
 
 * A device capable of running the Python program for a while (if you plan on leaving the bot online most of the time)
-* `ffmpeg` and Playwright's Chromium, if you want `/cc-chart` to render videos
+* `ffmpeg`, if you want `/cc-chart` to render videos
 
 ### Discord Bot
 
@@ -115,12 +115,34 @@ Ensure you have everything with:
 Get all the required modules with:
 `pip install -r requirements.txt`
 
-`/cc-chart` additionally needs a browser and ffmpeg, neither of which `pip` can provide on its own:
+`/cc-chart` renders videos locally (no browser), but needs `ffmpeg` on your `PATH` — a system package (`brew install ffmpeg`, `apt install ffmpeg`, ...), not a Python one. Rendering is spread over several worker processes; set the `CC_CHART_WORKERS` environment variable to change how many (default: CPU cores minus one, at most 8).
 
-* `python -m playwright install chromium` — ~95MB, and a *separate* step: `pip install playwright` only installs the Python client. On Linux you may also need `python -m playwright install-deps chromium` (requires root).
-* `ffmpeg` on your `PATH` — a system package (`brew install ffmpeg`, `apt install ffmpeg`, ...), not a Python one.
+The "game" render modes draw notes with a [MajdataPlay](https://github.com/LingFeng-bbben/MajdataPlay) skin, which this repo does **not** ship (the art isn't ours to redistribute). To use one, run this once against a MajdataPlay checkout that has the skin under `Assets/StreamingAssets/Skins/` (default skin name `Deluxe`):
 
-Both are checked at runtime. Without them `/cc-chart` still answers, it just replies with the chart's stats instead of a video; every other command is unaffected.
+```
+python import_chart_skin.py /path/to/MajdataPlay --skin Deluxe
+```
+
+It copies the skin and MajdataPlay's tap sound into `assets/chart_skin/` (gitignored) and extracts MajdataPlay's slide layouts. Without it, the game modes fall back to the mai-notes style and sounds.
+
+#### Rendering on another machine (optional)
+
+Renders can run on a faster computer on the same network instead. On that machine, clone this repo, `pip install -r requirements.txt`, install ffmpeg, and run `import_chart_skin.py` there too if you want the game modes. Then pick a shared secret (`python -c "import secrets; print(secrets.token_urlsafe(32))"`) and start the server with it:
+
+```
+CC_RENDER_SERVER_KEY=<secret> python render_server.py --port 8765
+```
+
+On the bot's machine, add the server's address and the same secret to `config.json`:
+
+```json
+"chart_render_server": "http://192.168.1.50:8765",
+"chart_render_key": "<secret>"
+```
+
+The key is encrypted in place the next time the bot starts. Give the render machine a fixed LAN address (a DHCP reservation on your router) so the URL keeps working. If the server is off or unreachable, `/cc-chart` says so and renders on the bot's machine as before. Leave `chart_render_server` empty to always render locally.
+
+ffmpeg and `skia-python` are checked at runtime. Without them `/cc-chart` still answers, it just replies with the chart's stats instead of a video; every other command is unaffected.
 
 Run the bot once with `python main.py` - it will create a `config.json` for you and prompt you to fill in your bot token (and optionally your Discord user ID as `owner_id`) before continuing.
 

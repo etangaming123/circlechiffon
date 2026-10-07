@@ -5,7 +5,8 @@ Files: user_templates/<discord_id>/<kind>/{base.png, top.png, layout.json},
 anchored to the repo directory (same reasoning as generate_templates'
 TEMPLATES_DIR). Everything written here has already been through
 validate.py. Whitelist: the template_whitelist table, plus the bot owner
-implicitly.
+implicitly. /cc-chart's video renders are gated on the same whitelist
+(cogs/chart.py's `_may_render`).
 
 Renderers never see this module - cogs call `get_user_template()` and pass
 the resulting RenderTemplate (or None) straight through.

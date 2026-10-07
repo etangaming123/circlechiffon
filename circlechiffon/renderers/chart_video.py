@@ -105,7 +105,9 @@ def _read_wav(path: Path):
     return data, rate
 
 
-def _build_sfx_track(capture: CaptureResult, samples: tuple[Path, Path], out_path: Path) -> None:
+def _build_sfx_track(
+    capture: CaptureResult, samples: tuple[Path, Path], out_path: Path, shift_ms: float = SFX_SHIFT_MS
+) -> None:
     """Mixes one sample per recorded hit into a single mono wav.
 
     Thousands of hits is normal for a maimai chart, so this is a numpy
@@ -129,9 +131,10 @@ def _build_sfx_track(capture: CaptureResult, samples: tuple[Path, Path], out_pat
 
     for hit in capture.sfx:
         sample = each if hit.is_each else answer
-        # Events are recorded at the simulation step that fired them, so
-        # they sit 0..16.7ms late; half a step back centres the error.
-        start = int((hit.time_ms - SFX_SHIFT_MS) / 1000.0 * rate)
+        # Browser-captured events are recorded at the simulation step that
+        # fired them, so they sit 0..16.7ms late; half a step back centres
+        # the error. The local renderer's times are exact (shift 0).
+        start = int((hit.time_ms - shift_ms) / 1000.0 * rate)
         if start >= total:
             continue
         if start < 0:
@@ -217,17 +220,21 @@ async def encode_capture(
     *,
     with_audio: bool = True,
     size_limit: int = SIZE_BUDGET,
+    sfx_shift_ms: float = SFX_SHIFT_MS,
+    hit_sound: Path | None = None,
 ) -> Path:
-    """Captured stream (+ rebuilt SFX) -> an mp4 under Discord's limit."""
+    """Captured stream (+ rebuilt SFX) -> an mp4 under Discord's limit.
+    `hit_sound` replaces mai-notes' two tap samples with one wav used for
+    every hit, simultaneous or not (the game sounds one tap either way)."""
     ffmpeg = ffmpeg_path()
 
     audio: Path | None = None
     if with_audio and capture.sfx:
-        samples = await _ensure_sfx_samples()
+        samples = (hit_sound, hit_sound) if hit_sound is not None else await _ensure_sfx_samples()
         if samples is not None:
             audio = out_path.with_name(out_path.stem + "-sfx.wav")
             try:
-                await asyncio.to_thread(_build_sfx_track, capture, samples, audio)
+                await asyncio.to_thread(_build_sfx_track, capture, samples, audio, sfx_shift_ms)
             except (VideoEncodeError, OSError, ValueError):
                 audio.unlink(missing_ok=True)
                 audio = None  # a silent render beats a failed one
