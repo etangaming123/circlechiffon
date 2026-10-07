@@ -18,3 +18,5 @@ im_a_filthy_vibecoder_lmfao.txt
 startcirclechiffon.bat
 templates/
 data/version_logo_cache
+# MajdataPlay skin + slide data imported by import_chart_skin.py - GPL / game art, never commit
+assets/chart_skin/

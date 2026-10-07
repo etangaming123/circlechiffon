@@ -198,6 +198,9 @@ class CaptureResult:
     end_measure: int = 0
     total_measures: int = 0
     truncated: bool = False
+    # Chart time at the first frame. Only the local renderer sets it: it
+    # can split one chart into several overlapping videos.
+    start_seconds: float = 0.0
 
     @property
     def duration_seconds(self) -> float:

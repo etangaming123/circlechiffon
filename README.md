@@ -59,7 +59,7 @@ Commands marked 🔗 need a linked SEGA ID account. Everything else works with n
 
 ### Charts
 
-* `/cc-chart` — Look up a chart on [mai-notes.com](https://mai-notes.com/): level, constant, note breakdown, charter, top DX score and tags. **For the bot owner only**, renders the chart as a *video of it playing*, with tap sounds mixed in
+* `/cc-chart` — Look up a chart on [mai-notes.com](https://mai-notes.com/): level, constant, note breakdown, charter, top DX score and tags. Can also render the chart as a *video of it playing*, with tap sounds mixed in — in a plain mai-notes style (default), or with a maimai look showing every judgement as CRITICAL PERFECT or MISS. Long charts come as several overlapping videos rather than one blurry one. Renders run one at a time in a queue, with a 30-second cooldown per user; who can render is set by `chart_render` in `config.json` (`"owner"`, the default, or `"everyone"`)
 
 ### Owner
 
@@ -107,6 +107,14 @@ Get all the required modules with:
 `pip install -r requirements.txt`
 
 `/cc-chart` renders videos locally (no browser), but needs `ffmpeg` on your `PATH` — a system package (`brew install ffmpeg`, `apt install ffmpeg`, ...), not a Python one. Rendering is spread over several worker processes; set the `CC_CHART_WORKERS` environment variable to change how many (default: CPU cores minus one, at most 8).
+
+The "game" render modes draw notes with a [MajdataPlay](https://github.com/LingFeng-bbben/MajdataPlay) skin, which this repo does **not** ship (the art isn't ours to redistribute). To use one, run this once against a MajdataPlay checkout that has the skin under `Assets/StreamingAssets/Skins/` (default skin name `Deluxe`):
+
+```
+python import_chart_skin.py /path/to/MajdataPlay --skin Deluxe
+```
+
+It copies the skin into `assets/chart_skin/` (gitignored) and extracts MajdataPlay's slide layouts. Without it, the game modes fall back to the mai-notes style.
 
 ffmpeg and `skia-python` are checked at runtime. Without them `/cc-chart` still answers, it just replies with the chart's stats instead of a video; every other command is unaffected.
 

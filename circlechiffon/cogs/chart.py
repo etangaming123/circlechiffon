@@ -8,15 +8,23 @@ file is the Discord surface: resolve the user's song to a mai-notes chart,
 queue the render, and pick which of the several "can't render that"
 messages applies.
 
-The render still takes every worker core for several seconds, so
-**rendering is owner-only** and serialised behind a semaphore. Everyone else
-gets the chart's data as an embed, which costs no more than /cc-info does.
+A render takes every worker core for several seconds, so renders go through
+a FIFO queue, one at a time, and each user then waits _RENDER_COOLDOWN
+seconds before their next (the owner skips the cooldown, never the queue).
+Who may render at all is `config.chart_render` ("owner" by default, or
+"everyone"); anyone else gets the chart's data as an embed, which costs no
+more than /cc-info does.
+
+A long chart comes back as several overlapping videos rather than one
+heavily compressed one (see chart_local._split); the message lists each
+video's span of the song.
 
 (`adapters/mainotes/player.py` - the old headless-Chromium capture - is no
 longer called from here.)
 """
 
 import asyncio
+import contextlib
 import io
 import re
 import tempfile
@@ -27,6 +35,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from config import config
+
 from circlechiffon import access, embed_colors
 from circlechiffon.adapters.dxrating.images import jacket_url
 from circlechiffon.adapters.mainotes.catalog import MaiNotesChart, fetch_chart_text, get_mainotes_catalog
@@ -35,6 +45,9 @@ from circlechiffon.renderers.chart_local import (
     HI_SPEED_DEFAULT,
     HI_SPEED_MAX,
     HI_SPEED_MIN,
+    MODE_GAME,
+    MODE_MISS,
+    MODE_SIMPLE,
     ChartRenderError,
     ChartRenderUnavailable,
     clamp_hi_speed,
@@ -51,11 +64,63 @@ from circlechiffon.renderers.chart_video import (
 from circlechiffon.songdata.catalog import get_catalog
 from circlechiffon.types import ChartType, Difficulty
 
-# One render at a time. Each render already fans out across every worker
-# process, so running two at once only makes both slower.
-_RENDER_LOCK = asyncio.Semaphore(1)
-_MAX_QUEUE = 3
-_queued = 0
+# Seconds a user waits after a render finishes before starting another. A
+# key of its own: the command's cheap lookup stays on DEFAULT_COOLDOWN.
+_RENDER_COOLDOWN = 30
+_RENDER_COOLDOWN_KEY = "cc-chart-render"
+_MAX_QUEUE = 5
+
+
+class _RenderQueue:
+    """Renders run one at a time, first come first served. Each render
+    already fans out across every worker process, so running two at once
+    would only make both slower."""
+
+    def __init__(self) -> None:
+        self._tickets: list[tuple[object, int]] = []
+        self._changed = asyncio.Condition()
+
+    def __len__(self) -> int:
+        return len(self._tickets)
+
+    def has(self, user_id: int) -> bool:
+        return any(uid == user_id for _, uid in self._tickets)
+
+    def _ahead(self, ticket: object) -> int:
+        return next(i for i, (t, _) in enumerate(self._tickets) if t is ticket)
+
+    @contextlib.asynccontextmanager
+    async def turn(self, user_id: int, on_wait):
+        """Waits for this caller's turn, awaiting `on_wait(renders_ahead)`
+        each time its place in line changes, and holds the turn for the
+        body of the `async with`."""
+        ticket = object()
+        self._tickets.append((ticket, user_id))
+        try:
+            shown = None
+            while True:
+                async with self._changed:
+                    ahead = self._ahead(ticket)
+                    if ahead == 0:
+                        break
+                    if ahead == shown:
+                        await self._changed.wait()
+                        continue
+                # Outside the lock: on_wait is a Discord edit.
+                shown = ahead
+                await on_wait(ahead)
+            yield
+        finally:
+            self._tickets = [entry for entry in self._tickets if entry[0] is not ticket]
+            async with self._changed:
+                self._changed.notify_all()
+
+
+_queue = _RenderQueue()
+
+
+def _may_render(user_id: int) -> bool:
+    return access.is_owner(user_id) or config.chart_render == "everyone"
 
 _DIFFICULTY_CHOICES = [
     app_commands.Choice(name=d.display_name, value=d.value)
@@ -63,6 +128,12 @@ _DIFFICULTY_CHOICES = [
 ]
 # The first DX/STD command parameter in the bot - every other command shows
 # both types side by side rather than asking which one you meant.
+_RENDER_MODE_CHOICES = [
+    app_commands.Choice(name="Simple (mai-notes style, fastest)", value=MODE_SIMPLE),
+    app_commands.Choice(name="Game (maimai skin, all CRITICAL PERFECT)", value=MODE_GAME),
+    app_commands.Choice(name="Game (maimai skin, all MISS)", value=MODE_MISS),
+]
+_RENDER_MODE_LABELS = {MODE_SIMPLE: "simple", MODE_GAME: "all CRITICAL PERFECT", MODE_MISS: "all MISS"}
 _CHART_TYPE_CHOICES = [
     app_commands.Choice(name="DX", value=ChartType.dx.value),
     app_commands.Choice(name="Standard", value=ChartType.std.value),
@@ -77,17 +148,26 @@ _COVERAGE_HINT = (
 )
 
 
-def _safe_filename(title: str, difficulty: Difficulty) -> str:
+def _safe_filename(title: str, difficulty: Difficulty, part: int | None = None) -> str:
     """Song titles include path separators and invisible characters (one
     real mai-notes title is a single U+200E), so a title can't go into a
     filename unfiltered."""
     cleaned = "".join(ch for ch in unicodedata.normalize("NFKC", title) if unicodedata.category(ch) != "Cf")
     slug = re.sub(r"[^\w\-]+", "-", cleaned, flags=re.UNICODE).strip("-")[:60]
-    return f"chart-{slug or 'song'}-{difficulty.value}.mp4"
+    suffix = f"-{part}" if part is not None else ""
+    return f"chart-{slug or 'song'}-{difficulty.value}{suffix}.mp4"
 
 
 def _format_clock(seconds: float) -> str:
     return f"{int(seconds) // 60}:{int(seconds) % 60:02d}"
+
+
+def _part_span(capture) -> str:
+    """`1:02 - 2:15`: where in the song one video runs (the lead-in before
+    the first note counts as 0:00)."""
+    start = max(0.0, capture.start_seconds)
+    end = max(0.0, capture.start_seconds + capture.duration_seconds)
+    return f"{_format_clock(start)} - {_format_clock(end)}"
 
 
 def _upload_limit(interaction: discord.Interaction) -> int:
@@ -154,7 +234,7 @@ class ChartCog(commands.Cog):
 
     @app_commands.command(
         name="cc-chart",
-        description="Look up a chart on mai-notes.com (owner-only: render it as a video)",
+        description="Look up a chart on mai-notes.com and render it as a video",
     )
     @app_commands.describe(
         title="Song title (or part of it, including English/romanized aliases) to search for",
@@ -163,8 +243,11 @@ class ChartCog(commands.Cog):
         notespeed="Note speed / ハイスピ, 1.0-10.0 (default: 7.5)",
         from_measure="Start at this measure instead of the beginning",
         to_measure="Stop at this measure instead of playing to the end",
+        render_mode="Simple mai-notes style (default, fastest), or game look with every judgement shown",
     )
-    @app_commands.choices(difficulty=_DIFFICULTY_CHOICES, chart_type=_CHART_TYPE_CHOICES)
+    @app_commands.choices(
+        difficulty=_DIFFICULTY_CHOICES, chart_type=_CHART_TYPE_CHOICES, render_mode=_RENDER_MODE_CHOICES
+    )
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def chart(
@@ -176,12 +259,11 @@ class ChartCog(commands.Cog):
         notespeed: app_commands.Range[float, HI_SPEED_MIN, HI_SPEED_MAX] = HI_SPEED_DEFAULT,
         from_measure: app_commands.Range[int, 0, 2000] | None = None,
         to_measure: app_commands.Range[int, 1, 2000] | None = None,
+        render_mode: app_commands.Choice[str] | None = None,
     ):
         user_id = interaction.user.id
-        # DEFAULT_COOLDOWN, not a render-sized one: handle_command_access
-        # exempts the owner from cooldowns outright, and the owner is now the
-        # only person who can trigger a render - so a long tier would only
-        # ever throttle the cheap metadata lookup everyone else gets.
+        # DEFAULT_COOLDOWN covers the lookup; the render's own cooldown is
+        # checked (and set, once a render finishes) in _render.
         if not await access.handle_command_access(interaction, user_id, "cc-chart", access.DEFAULT_COOLDOWN):
             return
         await interaction.response.defer()
@@ -239,9 +321,9 @@ class ChartCog(commands.Cog):
             if song.image_name:
                 embed.set_thumbnail(url=jacket_url(song.image_name))
 
-            # Rendering is owner-only; everyone else still gets the lookup,
-            # which is the same local-manifest work /cc-info does.
-            if not access.is_owner(user_id):
+            # Those who can't render still get the lookup, which is the same
+            # local-manifest work /cc-info does.
+            if not _may_render(user_id):
                 bail()
                 embed.set_footer(text="Chart data from mai-notes.com")
                 await interaction.edit_original_response(
@@ -287,47 +369,70 @@ class ChartCog(commands.Cog):
             await self._render(
                 interaction, found, song, wanted_difficulty, embed,
                 clamp_hi_speed(notespeed), from_measure, to_measure, bail,
+                render_mode.value if render_mode else MODE_SIMPLE,
             )
         except Exception as e:
             await interaction.edit_original_response(
                 content=f"Couldn't render that chart: unexpected error ({type(e).__name__}: {e})"
             )
 
-    async def _render(self, interaction, chart, song, difficulty, embed, hi_speed, from_measure, to_measure, bail):
-        global _queued
+    async def _render(self, interaction, chart, song, difficulty, embed, hi_speed, from_measure, to_measure, bail,
+                      render_mode):
+        user_id = interaction.user.id
+        owner = access.is_owner(user_id)
 
-        if _queued >= _MAX_QUEUE:
+        async def refuse(content: str) -> None:
             bail()
-            await interaction.edit_original_response(
-                content="Chart renders are backed up right now - give it a minute and try again."
+            embed.set_footer(text="Chart data from mai-notes.com")
+            await interaction.edit_original_response(content=content, embed=embed)
+
+        if _queue.has(user_id):
+            await refuse("You already have a chart render queued or running - here's this chart's data meanwhile.")
+            return
+        retry_at = None if owner else access.cooldown_until(user_id, _RENDER_COOLDOWN_KEY)
+        if retry_at is not None:
+            await refuse(
+                f"You can render another chart <t:{round(retry_at)}:R> - here's this chart's data meanwhile."
             )
             return
+        if len(_queue) >= _MAX_QUEUE:
+            await refuse("Chart renders are backed up right now - give it a minute and try again.")
+            return
 
-        if _RENDER_LOCK.locked():
-            await interaction.edit_original_response(
-                content=f"Queued behind {_queued} other render(s)..."
-            )
+        async def on_wait(ahead: int) -> None:
+            noun = "render" if ahead == 1 else "renders"
+            with contextlib.suppress(discord.HTTPException):
+                await interaction.edit_original_response(
+                    content=f"Queued to render **{song.title}** [{difficulty.display_name}] - "
+                            f"{ahead} {noun} ahead of you..."
+                )
 
-        _queued += 1
+        rendered = False
         try:
-            async with _RENDER_LOCK:
+            async with _queue.turn(user_id, on_wait):
                 await interaction.edit_original_response(
                     content=f"Rendering **{song.title}** [{difficulty.display_name}]..."
                 )
-                await self._render_locked(
-                    interaction, chart, song, difficulty, embed, hi_speed, from_measure, to_measure, bail
+                rendered = await self._render_locked(
+                    interaction, chart, song, difficulty, embed, hi_speed, from_measure, to_measure, bail,
+                    render_mode,
                 )
         finally:
-            _queued -= 1
+            # From when the render finishes, so a long queue wait doesn't eat
+            # into it. The owner is exempt, as from every cooldown.
+            if rendered and not owner:
+                access.set_cooldown(user_id, _RENDER_COOLDOWN_KEY, _RENDER_COOLDOWN)
 
-    async def _render_locked(self, interaction, chart, song, difficulty, embed, hi_speed, from_measure, to_measure, bail):
+    async def _render_locked(self, interaction, chart, song, difficulty, embed, hi_speed, from_measure, to_measure,
+                             bail, render_mode) -> bool:
+        """Returns whether a render was actually attempted (which is what
+        the render cooldown charges for)."""
         limit = _upload_limit(interaction)
         progress = _ProgressReporter(interaction, song.title, difficulty)
 
         with tempfile.TemporaryDirectory(prefix="cc-chart-") as tmp:
             tmp_dir = Path(tmp)
             raw = tmp_dir / "capture.h264"
-            out = tmp_dir / "chart.mp4"
 
             chart_text = await fetch_chart_text(chart.id)
             if chart_text is None:
@@ -338,10 +443,11 @@ class ChartCog(commands.Cog):
                     content="Couldn't download this chart from mai-notes.com. Try again in a bit.",
                     embed=embed,
                 )
-                return
+                return False
 
+            captures = []
             try:
-                capture = await render_chart(
+                captures = await render_chart(
                     chart_text, raw,
                     ffmpeg=ffmpeg_path(),
                     hi_speed=hi_speed,
@@ -349,12 +455,18 @@ class ChartCog(commands.Cog):
                     to_measure=to_measure,
                     size_budget_bytes=limit,
                     progress=progress.update,
+                    render_mode=render_mode,
                 )
                 await progress.stop()
-                await interaction.edit_original_response(content="Encoding video...")
-                # Note times come straight from the chart, so no capture
-                # latency correction applies.
-                await encode_capture(capture, out, size_limit=limit, sfx_shift_ms=0)
+                plural = f" ({len(captures)} parts)" if len(captures) > 1 else ""
+                await interaction.edit_original_response(content=f"Encoding video{plural}...")
+                outs = []
+                for k, capture in enumerate(captures, start=1):
+                    out = tmp_dir / f"chart-{k}.mp4"
+                    # Note times come straight from the chart, so no capture
+                    # latency correction applies.
+                    await encode_capture(capture, out, size_limit=limit, sfx_shift_ms=0)
+                    outs.append(out)
             except ChartRenderUnavailable as e:
                 await progress.stop()
                 bail()
@@ -363,32 +475,54 @@ class ChartCog(commands.Cog):
                     content=f"Chart rendering isn't set up on this instance ({e}). Here's the chart's data instead.",
                     embed=embed,
                 )
-                return
+                return False
             except (ChartRenderError, VideoEncodeError, FfmpegUnavailable) as e:
                 await progress.stop()
                 await interaction.edit_original_response(content=f"The render failed: {e}")
-                return
+                return True
             finally:
+                for capture in captures:
+                    capture.video_path.unlink(missing_ok=True)
                 raw.unlink(missing_ok=True)
 
-            data = out.read_bytes()
+            videos = [out.read_bytes() for out in outs]
 
+        first, last = captures[0], captures[-1]
         footer = [
             f"Note speed {hi_speed:g}",
-            f"{capture.duration_seconds:.0f}s",
-            f"measures {capture.start_measure}-{capture.end_measure}/{capture.total_measures}",
+            _RENDER_MODE_LABELS.get(render_mode, render_mode),
+            f"{last.start_seconds + last.duration_seconds - first.start_seconds:.0f}s",
+            f"measures {first.start_measure}-{last.end_measure}/{first.total_measures}",
             "chart data from mai-notes.com",
         ]
         embed.set_footer(text=" · ".join(footer))
-        note = ""
-        if capture.truncated:
-            note = "This chart ran past the render limit, so the video is cut short.\n"
+        lines = []
+        if len(captures) > 1:
+            lines.append(" // ".join(
+                f"{k}: {_part_span(c)}" for k, c in enumerate(captures, start=1)
+            ))
+        if first.truncated:
+            lines.append("This chart ran past the render limit, so the video is cut short.")
+        await self._send_videos(interaction, song, difficulty, embed, "\n".join(lines) or None, captures, videos)
+        return True
 
-        await interaction.edit_original_response(
-            content=note or None,
-            embed=embed,
-            attachments=[discord.File(io.BytesIO(data), filename=_safe_filename(song.title, difficulty))],
-        )
+    async def _send_videos(self, interaction, song, difficulty, embed, content, captures, videos):
+        def file(k: int) -> discord.File:
+            part = k + 1 if len(videos) > 1 else None
+            return discord.File(io.BytesIO(videos[k]), filename=_safe_filename(song.title, difficulty, part))
+
+        try:
+            await interaction.edit_original_response(
+                content=content, embed=embed, attachments=[file(k) for k in range(len(videos))]
+            )
+        except discord.HTTPException as e:
+            # 413: every part fits the upload limit on its own, but not all
+            # of them in one message. One message per video instead.
+            if e.status != 413 or len(videos) == 1:
+                raise
+            await interaction.edit_original_response(content=content, embed=embed, attachments=[file(0)])
+            for k in range(1, len(videos)):
+                await interaction.followup.send(content=f"{k + 1}: {_part_span(captures[k])}", file=file(k))
 
     @chart.autocomplete("title")
     async def chart_autocomplete(self, interaction: discord.Interaction, current: str):

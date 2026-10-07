@@ -13,6 +13,7 @@ _DEFAULTS = {
     "token": "your bot token here",
     "owner_id": "your discord user id here (optional, for admin commands)",
     "db_path": "circlechiffon.db",
+    "chart_render": "owner",
 }
 
 
@@ -58,6 +59,9 @@ class Config:
         # explicitly is left untouched.
         raw_db_path = data.get("db_path", "circlechiffon.db")
         self.db_path = raw_db_path if os.path.isabs(raw_db_path) else str(_BASE_DIR / raw_db_path)
+        # Who may render /cc-chart videos: "owner" (the default) or "everyone".
+        # Anyone else still gets the chart lookup.
+        self.chart_render = str(data.get("chart_render", "owner")).strip().lower()
 
 
 config = Config()
