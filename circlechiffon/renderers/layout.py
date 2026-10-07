@@ -16,6 +16,7 @@ after adding or moving an element, or the editor drifts from the renderer.
 
 import io
 import re
+from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import NamedTuple
@@ -35,6 +36,39 @@ OUTLINE_WIDTH_MAX = 32
 
 def hex_to_rgb(value: str) -> tuple[int, int, int]:
     return int(value[1:3], 16), int(value[3:5], 16), int(value[5:7], 16)
+
+
+def merge_colors(defaults: dict | None, user: dict | None) -> dict[str, str]:
+    """Colour slots: the defaults' `colors` with the user's valid `#rrggbb`
+    values laid over the slots the defaults know. Anything else is silently
+    ignored here (validate.py is the strict gate at upload)."""
+    colors = {slot: value.lower() for slot, value in (defaults or {}).items()}
+    if isinstance(user, dict):
+        for slot, value in user.items():
+            if slot in colors and isinstance(value, str) and _HEX_COLOR.match(value):
+                colors[slot] = value.lower()
+    return colors
+
+
+@contextmanager
+def opacity(img: Image.Image, opacity: float, region: tuple[int, int, int, int]):
+    """Whatever is drawn onto `img` inside the block lands at `opacity`.
+    The drawing itself is ordinary full-opacity code; afterwards the region
+    is blended back toward what was there before. Over an opaque base that
+    is exactly what alpha-compositing the element would give, without
+    needing a transparent layer per element. `region` must cover everything
+    the block draws; it is clipped to the image."""
+    if opacity >= 1:
+        yield
+        return
+    x0, y0, x1, y1 = region
+    box = (max(0, int(x0)), max(0, int(y0)), min(img.width, int(x1)), min(img.height, int(y1)))
+    if box[2] <= box[0] or box[3] <= box[1]:
+        yield
+        return
+    before = img.crop(box)
+    yield
+    img.paste(Image.blend(before, img.crop(box), max(0.0, opacity)), box[:2])
 
 
 @dataclass(slots=True, frozen=True)
@@ -108,8 +142,9 @@ class Layout:
     (e.g. the rating badge after a variable-width name) can sit right
     after it - elements must be drawn in follow order."""
 
-    def __init__(self, elements: dict, defaults: dict, options: dict, card: "Layout | None" = None):
+    def __init__(self, elements: dict, defaults: dict, options: dict, card: "Layout | None" = None, colors: dict | None = None):
         self._elements = elements
+        self.colors = colors or {}
         self._defaults = defaults
         self.options = options
         self.card = card
@@ -132,7 +167,8 @@ class Layout:
             card_defaults = defaults["card"]["elements"]
             user_card = (user.get("card") or {}).get("elements")
             card = cls(_merge_elements(card_defaults, user_card, scale), card_defaults, {})
-        return cls(_merge_elements(defaults["elements"], user.get("elements"), scale), defaults["elements"], options, card)
+        colors = merge_colors(defaults.get("colors"), user.get("colors"))
+        return cls(_merge_elements(defaults["elements"], user.get("elements"), scale), defaults["elements"], options, card, colors)
 
     def reset_drawn(self) -> None:
         self._drawn_right.clear()
@@ -185,6 +221,11 @@ class Layout:
     def s(self, value: float, name: str) -> int:
         """An inner offset of element `name`, scaled with its height."""
         return round(value * self.scale(name))
+
+    def color(self, slot: str) -> tuple[int, int, int]:
+        """A layout-level colour slot (default overlaid by the user's
+        `colors`) as an RGB tuple."""
+        return hex_to_rgb(self.colors[slot])
 
     def raw(self, name: str) -> dict:
         return self._elements[name]

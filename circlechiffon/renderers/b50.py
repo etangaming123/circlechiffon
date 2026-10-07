@@ -1,5 +1,4 @@
 import io
-from contextlib import contextmanager
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
@@ -7,6 +6,7 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 from circlechiffon.ratingcalc.best50 import Best50Result, RatedEntry
 from circlechiffon.ratingcalc.calculator import rank_tag_for_achievement
 from circlechiffon.renderers.layout import LAYOUT_VERSION, Box, Layout, RenderTemplate, apply_top, font, make_base
+from circlechiffon.renderers.layout import opacity as _opacity
 from circlechiffon.types import Difficulty
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent.parent / "assets"
@@ -93,6 +93,10 @@ _WIDE_STRIP_H = 24 / 32
 _SECTION_OLD_COLOR = (140, 150, 210)  # B35 - older-version bests
 _SECTION_NEW_COLOR = (255, 176, 64)  # B15 - current-version bests, called out more
 _DIVIDER_COLOR = (70, 72, 88)  # vertical rule between the two grid blocks
+
+
+def _rgb_hex(rgb: tuple[int, int, int]) -> str:
+    return "#%02x%02x%02x" % rgb
 
 # shared with renderers/display.py and renderers/profile.py - the
 # title/trophy banner has no image asset anywhere on the real site (it's
@@ -433,27 +437,6 @@ def _paste_icon(base: Image.Image, icon_bytes: bytes | None, pos: tuple[int, int
         return 0
 
 
-@contextmanager
-def _opacity(img: Image.Image, opacity: float, region: tuple[int, int, int, int]):
-    """Whatever is drawn onto `img` inside the block lands at `opacity`.
-    The drawing itself is ordinary full-opacity code; afterwards the region
-    is blended back toward what was there before. Over an opaque base that
-    is exactly what alpha-compositing the element would give, without
-    needing a transparent layer per element. `region` must cover everything
-    the block draws; it is clipped to the image."""
-    if opacity >= 1:
-        yield
-        return
-    x0, y0, x1, y1 = region
-    box = (max(0, int(x0)), max(0, int(y0)), min(img.width, int(x1)), min(img.height, int(y1)))
-    if box[2] <= box[0] or box[3] <= box[1]:
-        yield
-        return
-    before = img.crop(box)
-    yield
-    img.paste(Image.blend(before, img.crop(box), max(0.0, opacity)), box[:2])
-
-
 def _pad_box(b: Box, pad: int) -> tuple[int, int, int, int]:
     return (b.x - pad, b.y - pad, b.right + pad, b.bottom + pad)
 
@@ -579,6 +562,11 @@ def default_layout() -> dict:
         "canvas": [CANVAS_WIDTH, CANVAS_HEIGHT],
         "elements": elements,
         "card": {"canvas": [CARD_WIDTH, CARD_HEIGHT], "elements": card},
+        "colors": {
+            "section_old": _rgb_hex(_SECTION_OLD_COLOR),
+            "section_new": _rgb_hex(_SECTION_NEW_COLOR),
+            "divider": _rgb_hex(_DIVIDER_COLOR),
+        },
         "options": {
             # the difficulty-coloured gradient behind each card - turn off
             # to let template art show through.
@@ -604,6 +592,12 @@ LABELS = {
     "grid_b35": "B35 grid",
     "grid_b15": "B15 grid",
 }
+COLOR_LABELS = {
+    "section_old": "Older-versions heading (B35)",
+    "section_new": "Current-version heading (B15)",
+    "divider": "Divider line",
+}
+
 CARD_LABELS = {
     "type_tag": "DX/STD tag",
     "level_badge": "Level",
@@ -944,11 +938,11 @@ def render_b50(
     # B35 grid (older-version bests) and B15 grid (current-version bests),
     # each under its own accent-colored label band, with a vertical rule
     # between them by default.
-    _render_section_header(image, draw, layout, "section_b35", "BEST 35 · OLDER VERSIONS", _SECTION_OLD_COLOR)
-    _render_section_header(image, draw, layout, "section_b15", f"BEST 15 · {b15_version_label}", _SECTION_NEW_COLOR)
+    _render_section_header(image, draw, layout, "section_b35", "BEST 35 · OLDER VERSIONS", layout.color("section_old"))
+    _render_section_header(image, draw, layout, "section_b15", f"BEST 15 · {b15_version_label}", layout.color("section_new"))
     if box := layout.box("divider"):
         with _opacity(image, layout.style("divider")["opacity"], _pad_box(box, 0)):
-            draw.rectangle([(box.x, box.y), (box.right, box.bottom)], fill=_DIVIDER_COLOR)
+            draw.rectangle([(box.x, box.y), (box.right, box.bottom)], fill=layout.color("divider"))
     for name, entries, cols in (("grid_b35", result.b35, B35_COLS), ("grid_b15", result.b15, B15_COLS)):
         if box := layout.box(name):
             _render_grid(image, entries, jackets_by_title, box.x, box.y, cols, badge_icons, layout)

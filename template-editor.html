@@ -74,13 +74,13 @@
 						<h2 class="h6" id="selection-title">No element selected</h2>
 						<p class="small muted" id="selection-hint">Click an element on the canvas or in the list below. Arrow keys nudge it (Shift: ×10).</p>
 						<div id="selection-fields" class="d-none">
+							<div id="geometry-fields">
 							<div class="form-row">
 								<div class="col"><label class="small" for="f-x">x</label><input type="number" id="f-x" class="form-control form-control-sm"></div>
 								<div class="col"><label class="small" for="f-y">y</label><input type="number" id="f-y" class="form-control form-control-sm"></div>
 								<div class="col"><label class="small" for="f-w">w</label><input type="number" id="f-w" class="form-control form-control-sm" min="1"></div>
 								<div class="col"><label class="small" for="f-h">h</label><input type="number" id="f-h" class="form-control form-control-sm" min="1"></div>
 							</div>
-							<label class="mt-2"><input type="checkbox" id="f-visible"> Visible</label>
 							<div id="follow-row" class="form-row mt-1">
 								<div class="col-7">
 									<label class="small" for="f-follow">Follow (sits right after)</label>
@@ -88,6 +88,9 @@
 								</div>
 								<div class="col-5"><label class="small" for="f-gap">gap</label><input type="number" id="f-gap" class="form-control form-control-sm"></div>
 							</div>
+							</div>
+							<p class="small muted mt-2 mb-0 d-none" id="multi-note">Several elements selected: drag or arrow keys move them together; visibility, opacity and text style apply to all.</p>
+							<label class="mt-2"><input type="checkbox" id="f-visible"> Visible</label>
 							<div class="mt-2">
 								<label class="small mb-0" for="f-opacity">Opacity <span id="f-opacity-val">100%</span></label>
 								<input type="range" id="f-opacity" class="custom-range" min="0" max="100" step="1" value="100">
@@ -111,8 +114,19 @@
 						</div>
 					</section>
 
+					<section class="panel d-none" id="colors-panel">
+						<h2 class="h6">Colours</h2>
+						<p class="small muted">Layout-wide colours. &#x21BA; restores the stock colour.</p>
+						<div id="colors"></div>
+					</section>
+
 					<section class="panel">
 						<h2 class="h6">Elements</h2>
+						<p class="small muted mb-1">Shift/Ctrl/Cmd-click to select several.</p>
+						<div class="btn-row mb-2">
+							<button type="button" class="btn btn-outline-light btn-sm" id="select-all">Select all</button>
+							<button type="button" class="btn btn-outline-light btn-sm" id="select-none">Clear</button>
+						</div>
 						<ul id="element-list" class="list-unstyled mb-0"></ul>
 					</section>
 				</aside>

@@ -240,3 +240,25 @@
 	line-height: 1;
 	white-space: nowrap;
 }
+
+.color-row {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	margin-bottom: 0.4rem;
+}
+
+.color-row input[type="color"] {
+	flex: none;
+	width: 40px;
+	height: 28px;
+	padding: 0;
+	border: 0;
+	background: none;
+}
+
+.color-row label {
+	flex: 1;
+	margin: 0;
+	font-size: 0.85rem;
+}

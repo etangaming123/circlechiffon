@@ -197,6 +197,11 @@ window.CC_TEMPLATE_KINDS = {
      }
     }
    },
+   "colors": {
+    "section_old": "#8c96d2",
+    "section_new": "#ffb040",
+    "divider": "#464858"
+   },
    "options": {
     "card_background": true,
     "collapse_badges": true
@@ -254,6 +259,11 @@ window.CC_TEMPLATE_KINDS = {
    "title",
    "type_tag"
   ],
+  "colorLabels": {
+   "section_old": "Older-versions heading (B35)",
+   "section_new": "Current-version heading (B15)",
+   "divider": "Divider line"
+  },
   "grid": {
    "cell": [
     600,
@@ -488,6 +498,11 @@ window.CC_TEMPLATE_KINDS = {
      "visible": true
     }
    },
+   "colors": {
+    "pill_border": "#0e76b2",
+    "pill_fill": "#48bfee",
+    "pill_text": "#0d375c"
+   },
    "options": {
     "count_pill_background": true
    }
@@ -526,7 +541,12 @@ window.CC_TEMPLATE_KINDS = {
   "cardLabels": null,
   "resize": {},
   "textElements": [],
-  "cardTextElements": []
+  "cardTextElements": [],
+  "colorLabels": {
+   "pill_border": "Count pill border",
+   "pill_fill": "Count pill fill",
+   "pill_text": "Count pill text"
+  }
  },
  "profile_extra": {
   "title": "Profile extra (/cc-profile view:extra)",
@@ -596,6 +616,16 @@ window.CC_TEMPLATE_KINDS = {
      "visible": true
     }
    },
+   "colors": {
+    "cp_bar_fill": "#40c8ff",
+    "cp_bar_overflow": "#ff8c3c",
+    "cp_bar_track": "#32323e",
+    "mission_row": "#262630",
+    "mission_row_cleared": "#283c2c",
+    "mission_border": "#373744",
+    "mission_accent": "#ffdd33",
+    "mission_text": "#96969e"
+   },
    "options": {
     "compact_lists": true
    }
@@ -618,6 +648,16 @@ window.CC_TEMPLATE_KINDS = {
    "ticket_list": "x"
   },
   "textElements": [],
-  "cardTextElements": []
+  "cardTextElements": [],
+  "colorLabels": {
+   "cp_bar_fill": "Class point bar",
+   "cp_bar_overflow": "Class point overflow",
+   "cp_bar_track": "Class point bar background",
+   "mission_row": "Mission row",
+   "mission_row_cleared": "Cleared mission row",
+   "mission_border": "Mission row border",
+   "mission_accent": "Mission accent (gold)",
+   "mission_text": "Pending mission text"
+  }
  }
 };

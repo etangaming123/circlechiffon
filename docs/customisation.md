@@ -46,6 +46,8 @@ A template has up to three parts, and each one is optional:
   - `count_pill_background` (profile core): the blue count pills. When it's off, counts are drawn in white with an outline.
   - `compact_lists` (profile extra): a list shorter than its box pulls later elements up. Turn it off if your art needs elements to stay put.
 - Arrow keys nudge the selected element (Shift nudges ×10). The working layout is autosaved in your browser for each kind.
+- **Multi-select**: Shift/Ctrl/Cmd-click elements (on the canvas or in the list), or use *Select all*. Dragging or the arrow keys move the whole selection; visibility, opacity and text style apply to all of it at once. Position, size and follow need a single element.
+- **Colours**: profile renders have layout-wide colour slots (count pill, class point bar, mission rows and so on), listed in the *Colours* panel. They aren't tied to one element. Each has a reset to the stock colour.
 - **Opacity / text style**: every element has an opacity slider (100% = untouched). Text elements also get a text colour, an outline colour and an outline width. Each has a reset button that goes back to the stock look. On the card view, `card_bg` is the card's background gradient, so its slider fades the whole card.
 - The editor shows boxes, not the real render. Use `/cc-template-preview` to see the real output.
 
@@ -68,6 +70,7 @@ A template has up to three parts, and each one is optional:
 - Coordinates are output pixels at `canvas` size. A layout authored at a different width is scaled to fit.
 - Any element or key you leave out keeps its default, so a file only needs to contain what it changes. The editor exports everything.
 - Styling keys, all optional: `opacity` (0 to 1), and on text elements only `color` and `outline_color` (`"#rrggbb"`) and `outline_width` (0 to 32, in canvas pixels, scaled with the box height like the font). A key left out keeps the stock colour, so a plain layout renders exactly as before. Style keys on a non-text element are ignored with a warning.
+- `colors` maps a colour slot to `"#rrggbb"`, e.g. `"colors": {"pill_fill": "#ff8fd0"}`. Slots differ per kind (the editor's *Colours* panel lists them); unknown slots are ignored with a warning and a bad hex value rejects the upload. Slots you leave out keep the stock colour.
 - Text elements scale their font with the box height. Image elements scale to the box height.
 - Unknown elements, keys and options are ignored, with a warning at upload. Wrong types, non-finite numbers, out-of-range values and `follow` loops reject the whole upload, and nothing is saved.
 - The footer (credits) is fixed and isn't part of the layout.

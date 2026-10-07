@@ -36,6 +36,9 @@ class TemplateKind:
     # outline_width in layout.json (every element accepts opacity)
     text_elements: frozenset[str] = frozenset()
     card_text_elements: frozenset[str] = frozenset()
+    # layout-level colour slots (layout.json `colors`) -> editor label; the
+    # slot names and stock values are default_layout()["colors"]
+    color_labels: dict[str, str] | None = None
 
 
 TEMPLATE_KINDS: dict[str, TemplateKind] = {
@@ -43,11 +46,15 @@ TEMPLATE_KINDS: dict[str, TemplateKind] = {
         "b50", "Best 50 (/cc-best)", b50.default_layout, b50.LABELS, b50.CARD_LABELS,
         resize={"grid_b35": "none", "grid_b15": "none", "card_divider": "x", "card_bg": "none"},
         text_elements=b50.TEXT_ELEMENTS, card_text_elements=b50.CARD_TEXT_ELEMENTS,
+        color_labels=b50.COLOR_LABELS,
     ),
-    "profile_core": TemplateKind("profile_core", "Profile core (/cc-profile)", profile.default_core_layout, profile.CORE_LABELS),
+    "profile_core": TemplateKind(
+        "profile_core", "Profile core (/cc-profile)", profile.default_core_layout, profile.CORE_LABELS,
+        color_labels=profile.CORE_COLOR_LABELS,
+    ),
     "profile_extra": TemplateKind(
         "profile_extra", "Profile extra (/cc-profile view:extra)", profile.default_extras_layout, profile.EXTRAS_LABELS,
-        fixed_size=False,
+        fixed_size=False, color_labels=profile.EXTRAS_COLOR_LABELS,
         # blocks keep their inner offsets at any width; lists grow by row
         resize={name: "x" for name in ("cp_block", "mile_block", "mission_list", "ticket_list")},
     ),
@@ -70,6 +77,7 @@ def editor_defaults() -> dict:
             "resize": spec.resize or {},
             "textElements": sorted(spec.text_elements),
             "cardTextElements": sorted(spec.card_text_elements),
+            "colorLabels": spec.color_labels or {},
         }
         for key, spec in TEMPLATE_KINDS.items()
     }

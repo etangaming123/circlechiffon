@@ -10,12 +10,14 @@ from circlechiffon.renderers.b50 import (
     _hex_to_rgb,
     _paste_icon,
     _paste_rating_badge,
+    _pad_box,
     _paste_scaled,
     _rounded_mask,
     _scale_to_height,
     _truncate_to_width,
 )
 from circlechiffon.renderers.layout import LAYOUT_VERSION, Layout, RenderTemplate, apply_top, font, make_base
+from circlechiffon.renderers.layout import opacity as _opacity
 from circlechiffon.types import Profile, ProfileExtras
 
 _JP_BOLD = str(FONT_DIR / "NotoSansJP-Bold.ttf")
@@ -72,6 +74,21 @@ CANVAS_HEIGHT_CORE = HEADER_HEIGHT_CORE + GRID_HEIGHT + FOOTER_HEIGHT
 _PILL_BORDER_COLOR = (14, 118, 178)
 _PILL_FILL_COLOR = (72, 191, 238)
 _PILL_TEXT_COLOR = (13, 55, 92)
+
+# profile extra's stock colours - the layout-level colour slots default to
+# these (see default_extras_layout)
+_CP_BAR_FILL = (64, 200, 255)
+_CP_BAR_TRACK = (50, 50, 62)
+_CP_OVERFLOW_COLOR = (255, 140, 60)
+_MISSION_ROW = (38, 38, 48)
+_MISSION_ROW_CLEARED = (40, 60, 44)
+_MISSION_BORDER = (55, 55, 68)
+_MISSION_ACCENT = (255, 221, 51)  # maimille count, cleared check/text, rewards
+_MISSION_TEXT = (150, 150, 158)  # pending mission text
+
+
+def _rgb_hex(rgb: tuple[int, int, int]) -> str:
+    return "#%02x%02x%02x" % rgb
 
 
 def _paste_icon_centered(
@@ -161,6 +178,9 @@ def _draw_count_pill(
     font: ImageFont.FreeTypeFont,
     *,
     background: bool = True,
+    border_color: tuple[int, int, int] = _PILL_BORDER_COLOR,
+    fill_color: tuple[int, int, int] = _PILL_FILL_COLOR,
+    text_color: tuple[int, int, int] = _PILL_TEXT_COLOR,
 ) -> None:
     """Light-blue rounded "pill" holding a right-aligned count, matching the
     real playerData page's own music-count rows (a colored tier badge next
@@ -170,19 +190,19 @@ def _draw_count_pill(
     reads on whatever the template's own art puts behind it."""
     if background:
         radius = h // 2
-        draw.rounded_rectangle([(x, y), (x + w, y + h)], radius=radius, fill=_PILL_BORDER_COLOR)
+        draw.rounded_rectangle([(x, y), (x + w, y + h)], radius=radius, fill=border_color)
         inset = 3
         draw.rounded_rectangle(
             [(x + inset, y + inset), (x + w - inset, y + h - inset)],
             radius=max(radius - inset, 2),
-            fill=_PILL_FILL_COLOR,
+            fill=fill_color,
         )
     text_w = draw.textlength(text, font=font)
     bbox = draw.textbbox((0, 0), text, font=font)
     text_h = bbox[3] - bbox[1]
     pos = (x + w - 14 - text_w, y + (h - text_h) / 2 - bbox[1])
     if background:
-        draw.text(pos, text, font=font, fill=_PILL_TEXT_COLOR)
+        draw.text(pos, text, font=font, fill=text_color)
     else:
         draw.text(pos, text, font=font, fill=(255, 255, 255), stroke_width=2, stroke_fill=(20, 20, 20))
 
@@ -225,6 +245,11 @@ def default_core_layout() -> dict:
         "kind": "profile_core",
         "canvas": [CORE_CANVAS_WIDTH, CANVAS_HEIGHT_CORE],
         "elements": elements,
+        "colors": {
+            "pill_border": _rgb_hex(_PILL_BORDER_COLOR),
+            "pill_fill": _rgb_hex(_PILL_FILL_COLOR),
+            "pill_text": _rgb_hex(_PILL_TEXT_COLOR),
+        },
         "options": {"count_pill_background": True},
     }
 
@@ -235,6 +260,12 @@ _ROW_LABELS = {
     ("dxstar", "5"): "DX STAR 5", ("dxstar", "4"): "DX STAR 4", ("dxstar", "3"): "DX STAR 3", ("dxstar", "2"): "DX STAR 2", ("dxstar", "1"): "DX STAR 1",
     ("combo", "app"): "AP+", ("combo", "ap"): "AP", ("combo", "fcp"): "FC+", ("combo", "fc"): "FC",
     ("sync", "fdxp"): "FDX+", ("sync", "fdx"): "FDX", ("sync", "fsp"): "FS+", ("sync", "fs"): "FS", ("sync", "sync"): "SYNC PLAY",
+}
+
+CORE_COLOR_LABELS = {
+    "pill_border": "Count pill border",
+    "pill_fill": "Count pill fill",
+    "pill_text": "Count pill text",
 }
 
 CORE_LABELS = {
@@ -285,60 +316,73 @@ def _draw_core_header(
     capsule, and the rating/dan/class/star row - shared with
     /cc-friend-profile's card, which has the same fields bar the play
     counts (`show_play_stats=False`). Geometry comes from `layout`."""
+    def op(name: str, box, pad: int):
+        return _opacity(image, layout.style(name)["opacity"], _pad_box(box, pad))
+
     if box := layout.box("icon"):
-        _paste_square_icon(image, icon_bytes, box, 10)
+        with op("icon", box, 0):
+            _paste_square_icon(image, icon_bytes, box, 10)
 
     # small right-aligned play-count stats, stacked in their box. Friends
     # don't expose these.
     if show_play_stats and (box := layout.box("play_stats")):
-        stats_font = layout.font(_INTER_REGULAR, 11, "play_stats")
-        stats = [("Total Plays", profile.total_plays), ("This Version", profile.current_version_plays)]
-        stat_y = box.y
-        for label, value in stats:
-            text = f"{label}: {value:,}" if value is not None else f"{label}: -"
-            text_w = draw.textlength(text, font=stats_font)
-            draw.text((box.right - text_w, stat_y), text, font=stats_font, fill=(180, 180, 190))
-            stat_y += layout.s(15, "play_stats")
+        with op("play_stats", box, 20):
+            stats_font = layout.font(_INTER_REGULAR, 11, "play_stats")
+            stats = [("Total Plays", profile.total_plays), ("This Version", profile.current_version_plays)]
+            stat_y = box.y
+            for label, value in stats:
+                text = f"{label}: {value:,}" if value is not None else f"{label}: -"
+                text_w = draw.textlength(text, font=stats_font)
+                draw.text((box.right - text_w, stat_y), text, font=stats_font, fill=(180, 180, 190))
+                stat_y += layout.s(15, "play_stats")
 
     if box := layout.box("name"):
-        name_font = layout.font(_JP_BOLD, 34, "name")
-        name = _truncate_to_width(draw, profile.display_name, name_font, max(40, box.w))
-        draw.text((box.x, box.y), name, font=name_font, fill=(255, 255, 255))
+        with op("name", box, 20):
+            name_font = layout.font(_JP_BOLD, 34, "name")
+            name = _truncate_to_width(draw, profile.display_name, name_font, max(40, box.w))
+            draw.text((box.x, box.y), name, font=name_font, fill=(255, 255, 255))
 
     # title capsule. The name font is 34pt with real ink extending to
     # ~47px below its anchor, so the default capsule box sits 50px under
     # the name's rather than 34.
     if box := layout.box("title_capsule"):
-        _draw_title_capsule(image, draw, profile.title, profile.title_tier, (box.x, box.y), box.w, box.h)
+        with op("title_capsule", box, 4):
+            _draw_title_capsule(image, draw, profile.title, profile.title_tier, (box.x, box.y), box.w, box.h)
 
     # rating pill + rank badges + star count - each follows the one before
     # it by default, so a missing badge closes the gap instead of leaving it.
     rating_text = str(profile.rating) if profile.rating is not None else "?"
     if box := layout.box("rating_badge"):
-        rating_w = _paste_rating_badge(image, draw, rating_badge_bytes, rating_text, (box.x, box.y), box.h, RATING_ACCENT_COLOR)
-        if rating_w == 0:
-            label_font = layout.font(_INTER_REGULAR, 14, "rating_badge")
-            label = f"Rating {rating_text}"
-            draw.text((box.x, box.y + layout.s(10, "rating_badge")), label, font=label_font, fill=(200, 200, 205))
-            rating_w = round(draw.textlength(label, font=label_font))
+        with op("rating_badge", box, max(box.w, 4 * box.h)):
+            rating_w = _paste_rating_badge(image, draw, rating_badge_bytes, rating_text, (box.x, box.y), box.h, RATING_ACCENT_COLOR)
+            if rating_w == 0:
+                label_font = layout.font(_INTER_REGULAR, 14, "rating_badge")
+                label = f"Rating {rating_text}"
+                draw.text((box.x, box.y + layout.s(10, "rating_badge")), label, font=label_font, fill=(200, 200, 205))
+                rating_w = round(draw.textlength(label, font=label_font))
         layout.drawn("rating_badge", box.x + rating_w)
     else:
         layout.drawn("rating_badge", None)
     for name, rank_bytes in (("course_rank", course_rank_bytes), ("class_rank", class_rank_bytes)):
         box = layout.box(name)
-        used = _paste_scaled(image, rank_bytes, (box.x, box.y), box.h) if box else 0
+        if box:
+            with op(name, box, max(box.w, 4 * box.h)):
+                used = _paste_scaled(image, rank_bytes, (box.x, box.y), box.h)
+        else:
+            used = 0
         layout.drawn(name, box.x + used if used else None)
     if box := layout.box("star_count"):
-        star_x = box.x
-        used = _paste_icon(image, badge_icons.get("misc:star"), (star_x, box.y + layout.s(8, "star_count")), layout.s(22, "star_count"))
-        star_x += used + (layout.s(4, "star_count") if used else 0)
-        star_text = f"×{profile.star_count:,}" if profile.star_count is not None else "×-"
-        draw.text(
-            (star_x, box.y + layout.s(10, "star_count")),
-            star_text,
-            font=layout.font(_INTER_REGULAR, 14, "star_count"),
-            fill=(220, 220, 225),
-        )
+        with op("star_count", box, max(box.w, 4 * box.h)):
+            star_x = box.x
+            used = _paste_icon(image, badge_icons.get("misc:star"), (star_x, box.y + layout.s(8, "star_count")), layout.s(22, "star_count"))
+            star_x += used + (layout.s(4, "star_count") if used else 0)
+            star_text = f"×{profile.star_count:,}" if profile.star_count is not None else "×-"
+            draw.text(
+                (star_x, box.y + layout.s(10, "star_count")),
+                star_text,
+                font=layout.font(_INTER_REGULAR, 14, "star_count"),
+                fill=(220, 220, 225),
+            )
 
 
 def render_profile_core(
@@ -387,33 +431,35 @@ def render_profile_core(
         box = layout.box(name)
         if box is None:
             continue
-        s = layout.scale(name)
-        icon_box_w = round(GRID_ICON_BOX * s)
-        icon_center_x = box.x + icon_box_w // 2
-        # the CLEAR badge's source image is a much wider plaque than the
-        # rank/combo/sync/dxstar icons, so pasting it at the same target
-        # height as the rest makes it look oversized in its narrow box.
-        icon_target_h = round((26 if entry.category == "clear" else 42) * s)
-        icon_y = box.y + (box.h - icon_target_h) // 2
-        used = _paste_icon_centered(
-            image, badge_icons.get(f"{entry.category}:{entry.tag}"), icon_center_x, icon_y, icon_target_h, icon_box_w - round(6 * s)
-        )
-        label_font = font(_INTER_REGULAR, round(11 * s))
-        if used == 0:
-            # no icon available (e.g. remote fetch failed) - fall back to
-            # a plain text tag label so the row still identifies its tier.
-            label = entry.tag.upper()
-            label_w = draw.textlength(label, font=label_font)
-            draw.text(
-                (box.x + (icon_box_w - label_w) / 2, box.y + (box.h - 11 * s) / 2),
-                label, font=label_font, fill=(200, 200, 205),
+        with _opacity(image, layout.style(name)["opacity"], _pad_box(box, 4)):
+            s = layout.scale(name)
+            icon_box_w = round(GRID_ICON_BOX * s)
+            icon_center_x = box.x + icon_box_w // 2
+            # the CLEAR badge's source image is a much wider plaque than the
+            # rank/combo/sync/dxstar icons, so pasting it at the same target
+            # height as the rest makes it look oversized in its narrow box.
+            icon_target_h = round((26 if entry.category == "clear" else 42) * s)
+            icon_y = box.y + (box.h - icon_target_h) // 2
+            used = _paste_icon_centered(
+                image, badge_icons.get(f"{entry.category}:{entry.tag}"), icon_center_x, icon_y, icon_target_h, icon_box_w - round(6 * s)
             )
-        pill_x = box.x + icon_box_w + round(GRID_ICON_PILL_GAP * s)
-        count_text = f"{entry.earned:,}/{entry.total:,}" if entry.earned is not None and entry.total is not None else "-"
-        _draw_count_pill(
-            draw, pill_x, box.y, box.right - pill_x, box.h, count_text, font(_INTER_BOLD, round(17 * s)),
-            background=pill_background,
-        )
+            label_font = font(_INTER_REGULAR, round(11 * s))
+            if used == 0:
+                # no icon available (e.g. remote fetch failed) - fall back to
+                # a plain text tag label so the row still identifies its tier.
+                label = entry.tag.upper()
+                label_w = draw.textlength(label, font=label_font)
+                draw.text(
+                    (box.x + (icon_box_w - label_w) / 2, box.y + (box.h - 11 * s) / 2),
+                    label, font=label_font, fill=(200, 200, 205),
+                )
+            pill_x = box.x + icon_box_w + round(GRID_ICON_PILL_GAP * s)
+            count_text = f"{entry.earned:,}/{entry.total:,}" if entry.earned is not None and entry.total is not None else "-"
+            _draw_count_pill(
+                draw, pill_x, box.y, box.right - pill_x, box.h, count_text, font(_INTER_BOLD, round(17 * s)),
+                background=pill_background,
+                border_color=layout.color("pill_border"), fill_color=layout.color("pill_fill"), text_color=layout.color("pill_text"),
+            )
 
     _draw_footer(image, draw, CANVAS_HEIGHT_CORE, CORE_CANVAS_WIDTH)
     image = apply_top(image, template, stretch=True)
@@ -549,6 +595,16 @@ def default_extras_layout() -> dict:
         "kind": "profile_extra",
         "canvas": [EXTRAS_CANVAS_WIDTH, y_presents + _INTIMATE_H + FOOTER_HEIGHT],
         "elements": elements,
+        "colors": {
+            "cp_bar_fill": _rgb_hex(_CP_BAR_FILL),
+            "cp_bar_overflow": _rgb_hex(_CP_OVERFLOW_COLOR),
+            "cp_bar_track": _rgb_hex(_CP_BAR_TRACK),
+            "mission_row": _rgb_hex(_MISSION_ROW),
+            "mission_row_cleared": _rgb_hex(_MISSION_ROW_CLEARED),
+            "mission_border": _rgb_hex(_MISSION_BORDER),
+            "mission_accent": _rgb_hex(_MISSION_ACCENT),
+            "mission_text": _rgb_hex(_MISSION_TEXT),
+        },
         # on: a list shorter than its box pulls everything below it up
         # (the stock compact look). Turn off for template art that needs
         # elements to stay exactly where they were placed.
@@ -565,6 +621,17 @@ EXTRAS_LABELS = {
     "tickets_header": "TICKETS heading",
     "ticket_list": "Tickets",
     "presents": "Presents count",
+}
+
+EXTRAS_COLOR_LABELS = {
+    "cp_bar_fill": "Class point bar",
+    "cp_bar_overflow": "Class point overflow",
+    "cp_bar_track": "Class point bar background",
+    "mission_row": "Mission row",
+    "mission_row_cleared": "Cleared mission row",
+    "mission_border": "Mission row border",
+    "mission_accent": "Mission accent (gold)",
+    "mission_text": "Pending mission text",
 }
 
 # which elements are variable-length lists, and each one's row height
@@ -633,105 +700,121 @@ def render_profile_extras(
     image = make_base(template, (EXTRAS_CANVAS_WIDTH, canvas_h), BACKGROUND_COLOR, stretch=False)
     draw = ImageDraw.Draw(image)
 
+    def op(name: str, box, pad: int):
+        return _opacity(image, layout.style(name)["opacity"], _pad_box(box, pad))
+
+    cp_fill, cp_track, cp_overflow_color = layout.color("cp_bar_fill"), layout.color("cp_bar_track"), layout.color("cp_bar_overflow")
+    mission_row, mission_row_cleared = layout.color("mission_row"), layout.color("mission_row_cleared")
+    mission_border, accent, pending_text = layout.color("mission_border"), layout.color("mission_accent"), layout.color("mission_text")
+
     # header: icon + name only - no rating/title/ranks, this view is fully
     # separate from the core stats view.
     if box := boxes["icon"]:
-        _paste_square_icon(image, icon_bytes, box, 10)
+        with op("icon", box, 0):
+            _paste_square_icon(image, icon_bytes, box, 10)
     if box := boxes["name"]:
-        name_font = layout.font(_JP_BOLD, 34, "name")
-        name_text = _truncate_to_width(draw, profile.display_name, name_font, box.w)
-        draw.text((box.x, box.y), name_text, font=name_font, fill=(255, 255, 255))
+        with op("name", box, 20):
+            name_font = layout.font(_JP_BOLD, 34, "name")
+            name_text = _truncate_to_width(draw, profile.display_name, name_font, box.w)
+            draw.text((box.x, box.y), name_text, font=name_font, fill=(255, 255, 255))
 
     # CP (class point) section - hand-drawn bar, no gauge/meter image asset
     # (the real site's version is CSS clip-rect masked, not a flat image).
     if box := boxes["cp_block"]:
-        x0, x1, y = box.x, box.right, box.y
-        draw.text((x0, y + 6), "CLASS POINT", font=FONT_SECTION_TITLE, fill=(255, 255, 255))
-        cp_current, cp_required = extras.cp_current, extras.cp_required
-        cp_text = f"{cp_current if cp_current is not None else '-'} / {cp_required if cp_required is not None else '-'} CP"
-        cp_text_w = draw.textlength(cp_text, font=FONT_BODY)
-        draw.text((x1 - cp_text_w, y + 10), cp_text, font=FONT_BODY, fill=(220, 220, 225))
-        bar_y = y + 44
-        bar_h = 22
-        bar_w = x1 - x0
-        draw.rounded_rectangle([(x0, bar_y), (x1, bar_y + bar_h)], radius=bar_h // 2, fill=(50, 50, 62))
-        _CP_OVERFLOW_COLOR = (255, 140, 60)
-        overflow_tens = 0
-        if cp_current is not None:
-            if not cp_required:
-                # some classes have no maximum - render the gauge as completely full.
-                draw.rounded_rectangle([(x0, bar_y), (x1, bar_y + bar_h)], radius=bar_h // 2, fill=(64, 200, 255))
-            else:
-                # gauge only has 10 segments, so cp_current wraps like an odometer:
-                # the last digit fills the bar, the rest becomes a "+N" overflow badge.
-                ones = cp_current % 10
-                overflow_tens = cp_current // 10
-                if overflow_tens > 0:
-                    draw.rounded_rectangle([(x0, bar_y), (x1, bar_y + bar_h)], radius=bar_h // 2, fill=_CP_OVERFLOW_COLOR)
-                fill_w = round(bar_w * ones / 10)
-                if fill_w > 0:
-                    draw.rounded_rectangle([(x0, bar_y), (x0 + fill_w, bar_y + bar_h)], radius=bar_h // 2, fill=(64, 200, 255))
-        segments = 10
-        seg_w = bar_w / segments
-        # separators are cut in the canvas background colour; over template
-        # art that would draw stray flat-colour lines, so they're darkened
-        # track colour instead there.
-        sep_color = BACKGROUND_COLOR if not (template and template.base) else (30, 30, 38)
-        for i in range(1, segments):
-            sep_x = round(x0 + seg_w * i)
-            draw.line([(sep_x, bar_y + 2), (sep_x, bar_y + bar_h - 2)], fill=sep_color, width=2)
-        if overflow_tens > 0:
-            overflow_text = f"+{overflow_tens}"
-            overflow_w = draw.textlength(overflow_text, font=FONT_BODY)
-            draw.text((x1 - cp_text_w - overflow_w - 12, y + 10), overflow_text, font=FONT_BODY, fill=_CP_OVERFLOW_COLOR)
+        with op("cp_block", box, 20):
+            x0, x1, y = box.x, box.right, box.y
+            draw.text((x0, y + 6), "CLASS POINT", font=FONT_SECTION_TITLE, fill=(255, 255, 255))
+            cp_current, cp_required = extras.cp_current, extras.cp_required
+            cp_text = f"{cp_current if cp_current is not None else '-'} / {cp_required if cp_required is not None else '-'} CP"
+            cp_text_w = draw.textlength(cp_text, font=FONT_BODY)
+            draw.text((x1 - cp_text_w, y + 10), cp_text, font=FONT_BODY, fill=(220, 220, 225))
+            bar_y = y + 44
+            bar_h = 22
+            bar_w = x1 - x0
+            draw.rounded_rectangle([(x0, bar_y), (x1, bar_y + bar_h)], radius=bar_h // 2, fill=cp_track)
+            overflow_tens = 0
+            if cp_current is not None:
+                if not cp_required:
+                    # some classes have no maximum - render the gauge as completely full.
+                    draw.rounded_rectangle([(x0, bar_y), (x1, bar_y + bar_h)], radius=bar_h // 2, fill=cp_fill)
+                else:
+                    # gauge only has 10 segments, so cp_current wraps like an odometer:
+                    # the last digit fills the bar, the rest becomes a "+N" overflow badge.
+                    ones = cp_current % 10
+                    overflow_tens = cp_current // 10
+                    if overflow_tens > 0:
+                        draw.rounded_rectangle([(x0, bar_y), (x1, bar_y + bar_h)], radius=bar_h // 2, fill=cp_overflow_color)
+                    fill_w = round(bar_w * ones / 10)
+                    if fill_w > 0:
+                        draw.rounded_rectangle([(x0, bar_y), (x0 + fill_w, bar_y + bar_h)], radius=bar_h // 2, fill=cp_fill)
+            segments = 10
+            seg_w = bar_w / segments
+            # separators are cut in the canvas background colour; over template
+            # art that would draw stray flat-colour lines, so they're darkened
+            # track colour instead there.
+            sep_color = BACKGROUND_COLOR if not (template and template.base) else (30, 30, 38)
+            for i in range(1, segments):
+                sep_x = round(x0 + seg_w * i)
+                draw.line([(sep_x, bar_y + 2), (sep_x, bar_y + bar_h - 2)], fill=sep_color, width=2)
+            if overflow_tens > 0:
+                overflow_text = f"+{overflow_tens}"
+                overflow_w = draw.textlength(overflow_text, font=FONT_BODY)
+                draw.text((x1 - cp_text_w - overflow_w - 12, y + 10), overflow_text, font=FONT_BODY, fill=cp_overflow_color)
 
     # mile + mission status
     if box := boxes["mile_block"]:
-        x0, x1, y = box.x, box.right, box.y
-        mile_text = f"{extras.mile_count:,} maimille" if extras.mile_count is not None else "- maimille"
-        draw.text((x0, y + 4), mile_text, font=FONT_MILE, fill=(255, 221, 51))
-        if extras.mission_deadline_text:
-            deadline_w = draw.textlength(extras.mission_deadline_text, font=FONT_BODY_SMALL)
-            draw.text((x1 - deadline_w, y + 6), extras.mission_deadline_text, font=FONT_BODY_SMALL, fill=(180, 180, 190))
-        if extras.mission_clear_count is not None and extras.mission_total_count is not None:
-            clear_text = f"CLEAR {extras.mission_clear_count}/{extras.mission_total_count}"
-            draw.text((x0, y + 28), clear_text, font=FONT_BODY_SMALL, fill=(140, 220, 140))
+        with op("mile_block", box, 20):
+            x0, x1, y = box.x, box.right, box.y
+            mile_text = f"{extras.mile_count:,} maimille" if extras.mile_count is not None else "- maimille"
+            draw.text((x0, y + 4), mile_text, font=FONT_MILE, fill=accent)
+            if extras.mission_deadline_text:
+                deadline_w = draw.textlength(extras.mission_deadline_text, font=FONT_BODY_SMALL)
+                draw.text((x1 - deadline_w, y + 6), extras.mission_deadline_text, font=FONT_BODY_SMALL, fill=(180, 180, 190))
+            if extras.mission_clear_count is not None and extras.mission_total_count is not None:
+                clear_text = f"CLEAR {extras.mission_clear_count}/{extras.mission_total_count}"
+                draw.text((x0, y + 28), clear_text, font=FONT_BODY_SMALL, fill=(140, 220, 140))
 
-    _COMPLETE_YELLOW = (255, 221, 51)  # matches mile_text/reward accent yellow
     if box := boxes["mission_list"]:
-        x0, x1, y = box.x, box.right, box.y
-        for mission in extras.missions:
-            row_color = (40, 60, 44) if mission.cleared else (38, 38, 48)
-            draw.rectangle([(x0, y + 2), (x1, y + _MISSION_ROW_H - 6)], fill=row_color, outline=(55, 55, 68))
-            check = "✓" if mission.cleared else "○"
-            draw.text((x0 + 12, y + 12), check, font=FONT_BODY, fill=_COMPLETE_YELLOW if mission.cleared else (120, 120, 130))
-            text = "Complete!" if mission.cleared else (mission.text or "Complete previous mission to unlock!")
-            text = _truncate_to_width(draw, text, FONT_BODY_SMALL, box.w - 150)
-            draw.text((x0 + 40, y + 13), text, font=FONT_BODY_SMALL, fill=_COMPLETE_YELLOW if mission.cleared else (150, 150, 158))
-            if mission.mile_reward is not None:
-                reward_text = f"+{mission.mile_reward} maimille"
-                reward_w = draw.textlength(reward_text, font=FONT_BODY_SMALL)
-                draw.text((x1 - 12 - reward_w, y + 13), reward_text, font=FONT_BODY_SMALL, fill=(255, 221, 51))
-            y += _MISSION_ROW_H
+        # the list's real extent is its row count, not its (stock-sized) box
+        list_region = (box.x, box.y, box.right, box.y + max(box.h, len(extras.missions) * _MISSION_ROW_H))
+        with _opacity(image, layout.style("mission_list")["opacity"], list_region):
+            x0, x1, y = box.x, box.right, box.y
+            for mission in extras.missions:
+                row_color = mission_row_cleared if mission.cleared else mission_row
+                draw.rectangle([(x0, y + 2), (x1, y + _MISSION_ROW_H - 6)], fill=row_color, outline=mission_border)
+                check = "✓" if mission.cleared else "○"
+                draw.text((x0 + 12, y + 12), check, font=FONT_BODY, fill=accent if mission.cleared else (120, 120, 130))
+                text = "Complete!" if mission.cleared else (mission.text or "Complete previous mission to unlock!")
+                text = _truncate_to_width(draw, text, FONT_BODY_SMALL, box.w - 150)
+                draw.text((x0 + 40, y + 13), text, font=FONT_BODY_SMALL, fill=accent if mission.cleared else pending_text)
+                if mission.mile_reward is not None:
+                    reward_text = f"+{mission.mile_reward} maimille"
+                    reward_w = draw.textlength(reward_text, font=FONT_BODY_SMALL)
+                    draw.text((x1 - 12 - reward_w, y + 13), reward_text, font=FONT_BODY_SMALL, fill=accent)
+                y += _MISSION_ROW_H
 
     if box := boxes["tickets_header"]:
-        draw.text((box.x, box.y), "TICKETS", font=layout.font(_JP_BOLD, 20, "tickets_header"), fill=(255, 255, 255))
+        with op("tickets_header", box, 20):
+            draw.text((box.x, box.y), "TICKETS", font=layout.font(_JP_BOLD, 20, "tickets_header"), fill=(255, 255, 255))
     if box := boxes["ticket_list"]:
-        x0, y = box.x, box.y
-        if not extras.tickets:
-            draw.text((x0, y), "No tickets owned.", font=FONT_BODY_SMALL, fill=(150, 150, 158))
-        else:
-            for ticket, img_bytes in zip(extras.tickets, ticket_image_bytes):
-                used = _paste_scaled(image, img_bytes, (x0, y), 56)
-                text_x = x0 + used + (16 if used else 0)
-                draw.text((text_x, y + 6), ticket.name, font=FONT_BODY_SMALL, fill=(220, 220, 225))
-                count_text = f"×{ticket.count:,}" if ticket.count is not None else "×-"
-                draw.text((text_x, y + 30), count_text, font=FONT_BODY_SMALL, fill=(180, 180, 190))
-                y += _TICKET_ROW_H
+        list_region = (box.x, box.y, box.right, box.y + max(box.h, row_counts["ticket_list"] * _TICKET_ROW_H))
+        with _opacity(image, layout.style("ticket_list")["opacity"], list_region):
+            x0, y = box.x, box.y
+            if not extras.tickets:
+                draw.text((x0, y), "No tickets owned.", font=FONT_BODY_SMALL, fill=(150, 150, 158))
+            else:
+                for ticket, img_bytes in zip(extras.tickets, ticket_image_bytes):
+                    used = _paste_scaled(image, img_bytes, (x0, y), 56)
+                    text_x = x0 + used + (16 if used else 0)
+                    draw.text((text_x, y + 6), ticket.name, font=FONT_BODY_SMALL, fill=(220, 220, 225))
+                    count_text = f"×{ticket.count:,}" if ticket.count is not None else "×-"
+                    draw.text((text_x, y + 30), count_text, font=FONT_BODY_SMALL, fill=(180, 180, 190))
+                    y += _TICKET_ROW_H
 
     if box := boxes["presents"]:
-        intimate_text = f"Presents: {extras.intimate_count:,}" if extras.intimate_count is not None else "Presents: -"
-        draw.text((box.x, box.y), intimate_text, font=layout.font(_JP_MEDIUM, 16, "presents"), fill=(220, 220, 225))
+        with op("presents", box, 20):
+            intimate_text = f"Presents: {extras.intimate_count:,}" if extras.intimate_count is not None else "Presents: -"
+            draw.text((box.x, box.y), intimate_text, font=layout.font(_JP_MEDIUM, 16, "presents"), fill=(220, 220, 225))
 
     _draw_footer(image, draw, canvas_h, EXTRAS_CANVAS_WIDTH)
     image = apply_top(image, template, stretch=False)
