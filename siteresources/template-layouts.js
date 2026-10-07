@@ -187,6 +187,13 @@ window.CC_TEMPLATE_KINDS = {
       "w": 100,
       "h": 36,
       "visible": true
+     },
+     "card_bg": {
+      "x": 0,
+      "y": 0,
+      "w": 584,
+      "h": 414,
+      "visible": true
      }
     }
    },
@@ -221,13 +228,32 @@ window.CC_TEMPLATE_KINDS = {
    "sync_icon": "Sync badge",
    "combo_icon": "Combo badge",
    "rating_value": "Rating",
-   "rank_number": "#"
+   "rank_number": "#",
+   "card_bg": "Card background"
   },
   "resize": {
    "grid_b35": "none",
    "grid_b15": "none",
-   "card_divider": "x"
+   "card_divider": "x",
+   "card_bg": "none"
   },
+  "textElements": [
+   "name",
+   "section_b15",
+   "section_b35",
+   "stat_b15",
+   "stat_b35",
+   "stat_total"
+  ],
+  "cardTextElements": [
+   "achievement",
+   "difficulty_name",
+   "level_badge",
+   "rank_number",
+   "rating_value",
+   "title",
+   "type_tag"
+  ],
   "grid": {
    "cell": [
     600,
@@ -498,7 +524,9 @@ window.CC_TEMPLATE_KINDS = {
    "row_sync_sync": "Row: SYNC PLAY"
   },
   "cardLabels": null,
-  "resize": {}
+  "resize": {},
+  "textElements": [],
+  "cardTextElements": []
  },
  "profile_extra": {
   "title": "Profile extra (/cc-profile view:extra)",
@@ -588,6 +616,8 @@ window.CC_TEMPLATE_KINDS = {
    "mile_block": "x",
    "mission_list": "x",
    "ticket_list": "x"
-  }
+  },
+  "textElements": [],
+  "cardTextElements": []
  }
 };

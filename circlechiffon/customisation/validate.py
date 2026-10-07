@@ -12,6 +12,7 @@ always a clean subset of the schema (see docs/customisation.md).
 import io
 import json
 import math
+import re
 
 from PIL import Image
 
@@ -26,7 +27,11 @@ _ALLOWED_FORMATS = {"PNG", "JPEG", "WEBP"}
 # ratio - cap how tall a width-fitted image may end up.
 _MAX_FITTED_HEIGHT = 8192
 
-_ELEMENT_KEYS = {"x", "y", "w", "h", "visible", "follow", "gap"}
+_ELEMENT_KEYS = {"x", "y", "w", "h", "visible", "follow", "gap", "opacity", "color", "outline_color", "outline_width"}
+# styling that only means something on text elements
+_TEXT_ONLY_KEYS = {"color", "outline_color", "outline_width"}
+_HEX_COLOR = re.compile(r"#[0-9a-fA-F]{6}")
+MAX_OUTLINE_WIDTH = 32
 
 
 class TemplateError(ValueError):
@@ -92,7 +97,36 @@ def _number(value, path: str, errors: list[str], *, limit: int, positive: bool =
     return round(value)
 
 
-def _clean_group(raw, defaults: dict, path: str, limit: int, errors: list[str], warnings: list[str]) -> dict:
+def _opacity(value, path: str, errors: list[str]) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        errors.append(f"{path} must be a number from 0 to 1.")
+        return None
+    if not 0 <= value <= 1:
+        errors.append(f"{path} must be from 0 to 1.")
+        return None
+    return round(float(value), 3)
+
+
+def _color(value, path: str, errors: list[str]) -> str | None:
+    if not isinstance(value, str) or not _HEX_COLOR.fullmatch(value):
+        errors.append(f"{path} must be a hex colour like #ffcc00.")
+        return None
+    return value.lower()
+
+
+def _outline_width(value, path: str, errors: list[str]) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        errors.append(f"{path} must be a number.")
+        return None
+    if not 0 <= value <= MAX_OUTLINE_WIDTH:
+        errors.append(f"{path} must be from 0 to {MAX_OUTLINE_WIDTH}.")
+        return None
+    return round(float(value), 2)
+
+
+def _clean_group(
+    raw, defaults: dict, path: str, limit: int, errors: list[str], warnings: list[str], text_names=frozenset()
+) -> dict:
     if not isinstance(raw, dict):
         errors.append(f"{path} must be an object.")
         return {}
@@ -109,6 +143,19 @@ def _clean_group(raw, defaults: dict, path: str, limit: int, errors: list[str], 
         for key, value in element.items():
             if key not in _ELEMENT_KEYS:
                 warnings.append(f"Ignored unknown key {where}.{key}.")
+            elif key in _TEXT_ONLY_KEYS and name not in text_names:
+                warnings.append(f"Ignored {where}.{key} - {name} isn't a text element.")
+            elif key == "opacity" and name.startswith("grid_"):
+                warnings.append(f"Ignored {where}.opacity - grids have no opacity of their own.")
+            elif key == "opacity":
+                if (n := _opacity(value, f"{where}.opacity", errors)) is not None:
+                    out[key] = n
+            elif key in ("color", "outline_color"):
+                if (c := _color(value, f"{where}.{key}", errors)) is not None:
+                    out[key] = c
+            elif key == "outline_width":
+                if (n := _outline_width(value, f"{where}.outline_width", errors)) is not None:
+                    out[key] = n
             elif key in ("x", "y", "gap"):
                 if (n := _number(value, f"{where}.{key}", errors, limit=limit)) is not None:
                     out[key] = n
@@ -174,7 +221,10 @@ def validate_layout(data: bytes, kind: str) -> tuple[dict, list[str]]:
     limit = 2 * max(canvas)
 
     clean = {"version": LAYOUT_VERSION, "kind": kind, "canvas": list(canvas)}
-    clean["elements"] = _clean_group(raw.get("elements", {}), defaults["elements"], "elements", limit, errors, warnings)
+    spec = TEMPLATE_KINDS[kind]
+    clean["elements"] = _clean_group(
+        raw.get("elements", {}), defaults["elements"], "elements", limit, errors, warnings, spec.text_elements
+    )
 
     if "card" in raw:
         if "card" not in defaults:
@@ -183,7 +233,8 @@ def validate_layout(data: bytes, kind: str) -> tuple[dict, list[str]]:
             errors.append("card must be an object.")
         else:
             card_elements = _clean_group(
-                raw["card"].get("elements", {}), defaults["card"]["elements"], "card.elements", limit, errors, warnings
+                raw["card"].get("elements", {}), defaults["card"]["elements"], "card.elements", limit, errors, warnings,
+                spec.card_text_elements,
             )
             clean["card"] = {"elements": card_elements}
 

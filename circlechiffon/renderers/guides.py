@@ -32,12 +32,17 @@ class TemplateKind:
     # "x" (width only) or "none" (move only). Advisory - the renderer
     # accepts any box, but e.g. a grid's size is fixed by its cell constants.
     resize: dict[str, str] | None = None
+    # elements that draw text and so accept color / outline_color /
+    # outline_width in layout.json (every element accepts opacity)
+    text_elements: frozenset[str] = frozenset()
+    card_text_elements: frozenset[str] = frozenset()
 
 
 TEMPLATE_KINDS: dict[str, TemplateKind] = {
     "b50": TemplateKind(
         "b50", "Best 50 (/cc-best)", b50.default_layout, b50.LABELS, b50.CARD_LABELS,
-        resize={"grid_b35": "none", "grid_b15": "none", "card_divider": "x"},
+        resize={"grid_b35": "none", "grid_b15": "none", "card_divider": "x", "card_bg": "none"},
+        text_elements=b50.TEXT_ELEMENTS, card_text_elements=b50.CARD_TEXT_ELEMENTS,
     ),
     "profile_core": TemplateKind("profile_core", "Profile core (/cc-profile)", profile.default_core_layout, profile.CORE_LABELS),
     "profile_extra": TemplateKind(
@@ -63,6 +68,8 @@ def editor_defaults() -> dict:
             "labels": spec.labels,
             "cardLabels": spec.card_labels,
             "resize": spec.resize or {},
+            "textElements": sorted(spec.text_elements),
+            "cardTextElements": sorted(spec.card_text_elements),
         }
         for key, spec in TEMPLATE_KINDS.items()
     }

@@ -42,6 +42,17 @@
 		followRow: $("follow-row"),
 		fFollow: $("f-follow"),
 		fGap: $("f-gap"),
+		fOpacity: $("f-opacity"),
+		fOpacityVal: $("f-opacity-val"),
+		textStyle: $("text-style"),
+		textPreview: $("text-preview"),
+		fColor: $("f-color"),
+		fColorReset: $("f-color-reset"),
+		fOutlineColor: $("f-outline-color"),
+		fOutlineColorReset: $("f-outline-color-reset"),
+		fOutlineWidth: $("f-outline-width"),
+		fOutlineWidthVal: $("f-outline-width-val"),
+		fOutlineWidthReset: $("f-outline-width-reset"),
 		resizeNote: $("resize-note"),
 		list: $("element-list"),
 		scroll: $("stage-scroll"),
@@ -91,6 +102,9 @@
 	const labels = () => (isCardView() ? spec().cardLabels : spec().labels);
 	const canvasSize = () => (isCardView() ? spec().defaults.card.canvas : spec().defaults.canvas);
 	const resizeMode = (name) => spec().resize[name] || "both";
+	const isText = (name) => ((isCardView() ? spec().cardTextElements : spec().textElements) || []).includes(name);
+	const HEX = /^#[0-9a-fA-F]{6}$/;
+	const MAX_OUTLINE = 32;
 
 	// Merge an imported (or saved) layout over the defaults: only known
 	// elements/keys, numbers scaled from the canvas it was authored at.
@@ -109,6 +123,13 @@
 					if (typeof el[key] === "number" && isFinite(el[key])) target[name][key] = Math.round(el[key] * scale);
 				}
 				if (typeof el.visible === "boolean") target[name].visible = el.visible;
+				if (typeof el.opacity === "number" && isFinite(el.opacity)) target[name].opacity = Math.min(1, Math.max(0, el.opacity));
+				for (const key of ["color", "outline_color"]) {
+					if (typeof el[key] === "string" && HEX.test(el[key])) target[name][key] = el[key].toLowerCase();
+				}
+				if (typeof el.outline_width === "number" && isFinite(el.outline_width)) {
+					target[name].outline_width = Math.min(MAX_OUTLINE, Math.max(0, el.outline_width));
+				}
 				if ("follow" in el) target[name].follow = el.follow && target[el.follow] && el.follow !== name ? el.follow : null;
 			}
 		};
@@ -242,6 +263,7 @@
 			node.classList.toggle("follows", !!el.follow);
 			node.classList.toggle("hidden-element", el.visible === false);
 			node.classList.toggle("selected", state.selected === name);
+			node.style.opacity = el.opacity == null ? "" : String(Math.max(0.15, el.opacity));
 			Object.assign(node.style, {
 				left: effectiveX(name) + "px",
 				top: el.y + "px",
@@ -322,6 +344,24 @@
 		els.fFollow.value = el.follow || "";
 		els.fGap.value = el.gap || 0;
 		els.fGap.disabled = !el.follow;
+
+		const opacity = Math.round((el.opacity == null ? 1 : el.opacity) * 100);
+		els.fOpacity.value = opacity;
+		els.fOpacityVal.textContent = opacity + "%";
+		els.fOpacity.disabled = name.startsWith("grid_"); // the bot ignores opacity on grids
+		const text = isText(name);
+		els.textStyle.classList.toggle("d-none", !text);
+		if (text) {
+			els.fColor.value = el.color || "#ffffff";
+			els.fOutlineColor.value = el.outline_color || "#141414";
+			els.fOutlineWidth.value = el.outline_width == null ? 0 : el.outline_width;
+			els.fOutlineWidthVal.textContent = el.outline_width == null ? "default" : el.outline_width + "px";
+			// preview: shown on a checker so it's legible whatever the colour; scaled to a fixed size
+			els.textPreview.style.color = el.color || "#ffffff";
+			els.textPreview.style.webkitTextStroke = `${(el.outline_width || 0) * 1.5}px ${el.outline_color || "#141414"}`;
+			els.textPreview.style.paintOrder = "stroke fill";
+			els.textPreview.style.opacity = String(el.opacity == null ? 1 : el.opacity);
+		}
 	}
 
 	// ---- interaction
@@ -448,6 +488,16 @@
 			}
 		} else if (input === els.fGap) {
 			el.gap = num(el.gap || 0);
+		} else if (input === els.fOpacity) {
+			const v = Math.min(100, Math.max(0, Number(input.value)));
+			if (v >= 100) delete el.opacity; // absent = stock look
+			else el.opacity = v / 100;
+		} else if (input === els.fColor) {
+			el.color = input.value;
+		} else if (input === els.fOutlineColor) {
+			el.outline_color = input.value;
+		} else if (input === els.fOutlineWidth) {
+			el.outline_width = Math.min(MAX_OUTLINE, Math.max(0, Number(input.value)));
 		}
 		changed();
 	}
@@ -619,7 +669,16 @@
 			setStatus("Reset to defaults.");
 		});
 		for (const input of [els.fx, els.fy, els.fw, els.fh, els.fGap]) input.addEventListener("change", onField);
-		for (const input of [els.fVisible, els.fFollow]) input.addEventListener("change", onField);
+		for (const input of [els.fVisible, els.fFollow, els.fColor, els.fOutlineColor]) input.addEventListener("change", onField);
+		for (const input of [els.fOpacity, els.fOutlineWidth]) input.addEventListener("input", onField);
+		for (const [btn, key] of [[els.fColorReset, "color"], [els.fOutlineColorReset, "outline_color"], [els.fOutlineWidthReset, "outline_width"]]) {
+			btn.addEventListener("click", () => {
+				const el = state.selected && group()[state.selected];
+				if (!el) return;
+				delete el[key];
+				changed();
+			});
+		}
 		els.stage.addEventListener("pointerdown", (ev) => {
 			if (ev.target === els.stage || ev.target.parentElement === els.stage) select(null);
 		});

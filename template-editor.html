@@ -88,6 +88,25 @@
 								</div>
 								<div class="col-5"><label class="small" for="f-gap">gap</label><input type="number" id="f-gap" class="form-control form-control-sm"></div>
 							</div>
+							<div class="mt-2">
+								<label class="small mb-0" for="f-opacity">Opacity <span id="f-opacity-val">100%</span></label>
+								<input type="range" id="f-opacity" class="custom-range" min="0" max="100" step="1" value="100">
+							</div>
+							<div id="text-style" class="d-none mt-1">
+								<div class="text-preview-box"><span id="text-preview">Text preview 123</span></div>
+								<div class="form-row">
+									<div class="col-6">
+										<label class="small mb-0" for="f-color">Text colour</label>
+										<div class="d-flex"><input type="color" id="f-color" class="form-control form-control-sm p-0"><button type="button" class="btn btn-outline-light btn-sm ml-1" id="f-color-reset" title="Use default colour">&#x21BA;</button></div>
+									</div>
+									<div class="col-6">
+										<label class="small mb-0" for="f-outline-color">Outline colour</label>
+										<div class="d-flex"><input type="color" id="f-outline-color" class="form-control form-control-sm p-0"><button type="button" class="btn btn-outline-light btn-sm ml-1" id="f-outline-color-reset" title="Use default outline colour">&#x21BA;</button></div>
+									</div>
+								</div>
+								<label class="small mb-0 mt-1" for="f-outline-width">Outline width <span id="f-outline-width-val">default</span></label>
+								<div class="d-flex"><input type="range" id="f-outline-width" class="custom-range" min="0" max="32" step="0.5" value="0"><button type="button" class="btn btn-outline-light btn-sm ml-1" id="f-outline-width-reset" title="Use default outline">&#x21BA;</button></div>
+							</div>
 							<p class="small muted mt-1 mb-0" id="resize-note"></p>
 						</div>
 					</section>

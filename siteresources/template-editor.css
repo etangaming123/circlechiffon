@@ -222,3 +222,21 @@
 	border-color: #FBD796;
 	color: #0C152F;
 }
+
+.text-preview-box {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	height: 56px;
+	margin-bottom: 0.5rem;
+	border-radius: 4px;
+	background: repeating-conic-gradient(#3a3d4a 0% 25%, #2b2e3a 0% 50%) 0 0 / 16px 16px;
+	overflow: hidden;
+}
+
+#text-preview {
+	font-size: 26px;
+	font-weight: bold;
+	line-height: 1;
+	white-space: nowrap;
+}

@@ -1,4 +1,5 @@
 import io
+from contextlib import contextmanager
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
@@ -432,6 +433,57 @@ def _paste_icon(base: Image.Image, icon_bytes: bytes | None, pos: tuple[int, int
         return 0
 
 
+@contextmanager
+def _opacity(img: Image.Image, opacity: float, region: tuple[int, int, int, int]):
+    """Whatever is drawn onto `img` inside the block lands at `opacity`.
+    The drawing itself is ordinary full-opacity code; afterwards the region
+    is blended back toward what was there before. Over an opaque base that
+    is exactly what alpha-compositing the element would give, without
+    needing a transparent layer per element. `region` must cover everything
+    the block draws; it is clipped to the image."""
+    if opacity >= 1:
+        yield
+        return
+    x0, y0, x1, y1 = region
+    box = (max(0, int(x0)), max(0, int(y0)), min(img.width, int(x1)), min(img.height, int(y1)))
+    if box[2] <= box[0] or box[3] <= box[1]:
+        yield
+        return
+    before = img.crop(box)
+    yield
+    img.paste(Image.blend(before, img.crop(box), max(0.0, opacity)), box[:2])
+
+
+def _pad_box(b: Box, pad: int) -> tuple[int, int, int, int]:
+    return (b.x - pad, b.y - pad, b.right + pad, b.bottom + pad)
+
+
+def _draw_text(
+    draw: ImageDraw.ImageDraw,
+    style: dict,
+    xy: tuple[float, float],
+    text: str,
+    font: ImageFont.FreeTypeFont,
+    fill: tuple[int, int, int],
+    *,
+    stroke_width: int = 0,
+    stroke_fill: tuple[int, int, int] = (0, 0, 0),
+    anchor: str | None = None,
+) -> None:
+    """draw.text with the element's `style` (Layout.style) applied over the
+    renderer's defaults: the user's colour replaces `fill`, and their
+    outline colour/width replace the default stroke (an element with no
+    default stroke gets a black one only if the user sets a width)."""
+    if style["color"] is not None:
+        fill = style["color"]
+    if style["outline_color"] is not None:
+        stroke_fill = style["outline_color"]
+    if style["outline_width"] is not None:
+        stroke_width = max(0, round(style["outline_width"]))
+    kwargs = {"stroke_width": stroke_width, "stroke_fill": stroke_fill} if stroke_width > 0 else {}
+    draw.text(xy, text, font=font, fill=fill, anchor=anchor, **kwargs)
+
+
 def default_layout() -> dict:
     """render_b50's stock geometry as a layout dict - see
     renderers/layout.py. `card` is a second, card-relative layout shared by
@@ -514,6 +566,9 @@ def default_layout() -> dict:
         "combo_icon": {"x": right - icon * 2 - S(6), "y": body_top, "w": icon, "h": icon},
         "rating_value": {"x": right - S(90), "y": CARD_HEIGHT - S(42), "w": S(90), "h": S(40)},
         "rank_number": {"x": left, "y": CARD_HEIGHT - S(20), "w": S(50), "h": S(18)},
+        # the gradient behind the card - only its opacity/visibility are
+        # used; it always fills the whole card
+        "card_bg": {"x": 0, "y": 0, "w": CARD_WIDTH, "h": CARD_HEIGHT},
     }
     for group in (elements, card):
         for element in group.values():
@@ -562,7 +617,15 @@ CARD_LABELS = {
     "combo_icon": "Combo badge",
     "rating_value": "Rating",
     "rank_number": "#",
+    "card_bg": "Card background",
 }
+
+# elements that draw text, so take color / outline_color / outline_width
+# (anything may take opacity). Imported by customisation/validate.py.
+TEXT_ELEMENTS = frozenset({"name", "stat_total", "stat_b15", "stat_b35", "section_b35", "section_b15"})
+CARD_TEXT_ELEMENTS = frozenset(
+    {"type_tag", "level_badge", "title", "difficulty_name", "achievement", "rating_value", "rank_number"}
+)
 
 
 def _render_cell(
@@ -577,11 +640,22 @@ def _render_cell(
 ) -> None:
     card_pos = (x + CELL_PADDING, y + CELL_PADDING)
     card_layout = layout.card
-    draw_background = layout.options.get("card_background", True)
+    card_region = (card_pos[0], card_pos[1], card_pos[0] + CARD_WIDTH, card_pos[1] + CARD_HEIGHT)
+    draw_background = layout.options.get("card_background", True) and card_layout.visible("card_bg")
+    bg_opacity = card_layout.style("card_bg")["opacity"]
 
     def box(name: str):
         b = card_layout.box(name)
         return None if b is None else Box(card_pos[0] + b.x, card_pos[1] + b.y, b.w, b.h)
+
+    def op(name: str):
+        return _opacity(base, card_layout.style(name)["opacity"], card_region)
+
+    def paste_card_bg(card: Image.Image) -> None:
+        mask = _rounded_mask((CARD_WIDTH, CARD_HEIGHT), S(10))
+        if bg_opacity < 1:
+            mask = mask.point(lambda v: round(v * bg_opacity))
+        base.paste(card, card_pos, mask)
 
     if entry is None or entry.score.achievement == 0:
         # None is an unfilled slot; 0% achievement is a padding entry with
@@ -589,9 +663,7 @@ def _render_cell(
         # rather than showing a difficulty-colored card with a fake-looking
         # song.
         if draw_background:
-            mask = _rounded_mask((CARD_WIDTH, CARD_HEIGHT), S(10))
-            card = Image.new("RGB", (CARD_WIDTH, CARD_HEIGHT), (40, 40, 50))
-            base.paste(card, card_pos, mask)
+            paste_card_bg(Image.new("RGB", (CARD_WIDTH, CARD_HEIGHT), (40, 40, 50)))
         if entry is not None:
             draw = ImageDraw.Draw(base)
             draw.text((card_pos[0] + S(8), card_pos[1] + S(8)), "No Chart", font=FONT_RATING, fill=(150, 150, 155))
@@ -599,9 +671,7 @@ def _render_cell(
 
     palette = _card_palette(entry.sheet.difficulty)
     if draw_background:
-        card = _vertical_gradient((CARD_WIDTH, CARD_HEIGHT), palette["bg1"], palette["bg2"]).convert("RGBA")
-        mask = _rounded_mask((CARD_WIDTH, CARD_HEIGHT), S(10))
-        base.paste(card, card_pos, mask)
+        paste_card_bg(_vertical_gradient((CARD_WIDTH, CARD_HEIGHT), palette["bg1"], palette["bg2"]).convert("RGBA"))
 
     draw = ImageDraw.Draw(base)
     fg = palette["fg"]
@@ -609,99 +679,125 @@ def _render_cell(
     # header row: chart-type pill top-left, internal-level badge top-right -
     # mirrors the maimai NET score card's own header band.
     if b := box("type_tag"):
-        k = card_layout.scale("type_tag")
-        type_name = entry.sheet.type.value.upper() if entry.sheet.type else "?"
-        tag_color = _TYPE_TAG_COLORS.get(entry.sheet.type.value if entry.sheet.type else "", (90, 90, 100))
-        tag_font = font(_INTER_BOLD, round(S(13) * k))
-        tag_pad = round(S(7) * k)
-        tag_w = draw.textlength(type_name, font=tag_font) + tag_pad * 2
-        draw.rounded_rectangle([(b.x, b.y), (b.x + tag_w, b.y + b.h)], radius=round(S(10) * k), fill=tag_color)
-        draw.text((b.x + tag_pad, b.y + round(S(3) * k)), type_name, font=tag_font, fill=(255, 255, 255))
+        with op("type_tag"):
+            k = card_layout.scale("type_tag")
+            type_name = entry.sheet.type.value.upper() if entry.sheet.type else "?"
+            tag_color = _TYPE_TAG_COLORS.get(entry.sheet.type.value if entry.sheet.type else "", (90, 90, 100))
+            tag_font = font(_INTER_BOLD, round(S(13) * k))
+            tag_pad = round(S(7) * k)
+            tag_w = draw.textlength(type_name, font=tag_font) + tag_pad * 2
+            draw.rounded_rectangle([(b.x, b.y), (b.x + tag_w, b.y + b.h)], radius=round(S(10) * k), fill=tag_color)
+            _draw_text(
+                draw, card_layout.style("type_tag"), (b.x + tag_pad, b.y + round(S(3) * k)), type_name, tag_font, (255, 255, 255)
+            )
 
     # right-aligned to its box's right edge, growing leftward with the text
     if b := box("level_badge"):
-        k = card_layout.scale("level_badge")
-        level_value = entry.sheet.internal_level_value
-        level_display = f"{level_value:.1f}" if level_value is not None else (entry.sheet.level or "?")
-        level_font = font(_INTER_BOLD, round(S(18) * k))
-        level_pad = round(S(9) * k)
-        level_w = draw.textlength(level_display, font=level_font) + level_pad * 2
-        level_left = b.right - level_w
-        draw.rounded_rectangle(
-            [(level_left, b.y), (b.right, b.bottom)], radius=round(S(6) * k), fill=_shade(palette["bg1"], 0.5)
-        )
-        draw.text((level_left + level_pad, b.y + round(S(4) * k)), level_display, font=level_font, fill=fg)
+        with op("level_badge"):
+            k = card_layout.scale("level_badge")
+            level_value = entry.sheet.internal_level_value
+            level_display = f"{level_value:.1f}" if level_value is not None else (entry.sheet.level or "?")
+            level_font = font(_INTER_BOLD, round(S(18) * k))
+            level_pad = round(S(9) * k)
+            level_w = draw.textlength(level_display, font=level_font) + level_pad * 2
+            level_left = b.right - level_w
+            draw.rounded_rectangle(
+                [(level_left, b.y), (b.right, b.bottom)], radius=round(S(6) * k), fill=_shade(palette["bg1"], 0.5)
+            )
+            _draw_text(
+                draw, card_layout.style("level_badge"), (level_left + level_pad, b.y + round(S(4) * k)), level_display, level_font, fg
+            )
 
     # title - sized to fit rather than truncated: _fit_font shrinks the font
     # (down to its own 6px floor) until even a long title fits on one line,
     # instead of ellipsis-cutting it at a fixed size.
     if b := box("title"):
-        title_font = _fit_font(draw, entry.score.title, _JP_BOLD, b.w, b.h)
-        draw.text((b.x, b.y), entry.score.title, font=title_font, fill=fg)
+        with op("title"):
+            title_font = _fit_font(draw, entry.score.title, _JP_BOLD, b.w, b.h)
+            _draw_text(draw, card_layout.style("title"), (b.x, b.y), entry.score.title, title_font, fg)
 
     if b := box("card_divider"):
-        draw.line([(b.x, b.y), (b.right, b.y)], fill=_shade(palette["bg1"], 1.3), width=b.h)
+        with op("card_divider"):
+            draw.line([(b.x, b.y), (b.right, b.y)], fill=_shade(palette["bg1"], 1.3), width=b.h)
 
     if b := box("jacket"):
-        size = (b.w, b.h)
-        jmask = _rounded_mask(size, S(6))
-        pasted = False
-        if jacket_bytes:
-            try:
-                with Image.open(io.BytesIO(jacket_bytes)) as jacket:
-                    base.paste(jacket.convert("RGB").resize(size, Image.Resampling.LANCZOS), (b.x, b.y), jmask)
-                    pasted = True
-            except Exception:
-                pass
-        if not pasted:
-            base.paste(Image.new("RGB", size, (15, 15, 20)), (b.x, b.y), jmask)
+        with op("jacket"):
+            size = (b.w, b.h)
+            jmask = _rounded_mask(size, S(6))
+            pasted = False
+            if jacket_bytes:
+                try:
+                    with Image.open(io.BytesIO(jacket_bytes)) as jacket:
+                        base.paste(jacket.convert("RGB").resize(size, Image.Resampling.LANCZOS), (b.x, b.y), jmask)
+                        pasted = True
+                except Exception:
+                    pass
+            if not pasted:
+                base.paste(Image.new("RGB", size, (15, 15, 20)), (b.x, b.y), jmask)
 
     if b := box("rank_icon"):
-        rank_tag = rank_tag_for_achievement(entry.score.achievement)
-        _paste_icon(base, _load_rank_icon(rank_tag), (b.x, b.y), b.h)
+        with op("rank_icon"):
+            rank_tag = rank_tag_for_achievement(entry.score.achievement)
+            _paste_icon(base, _load_rank_icon(rank_tag), (b.x, b.y), b.h)
 
     # achievement rate, plain fg (white on normal cards, black on remaster's
     # light background via the same palette-driven color the rest of the
     # card's text uses) rather than a separate accent color.
     if b := box("achievement"):
-        achievement_font = card_layout.font(_JP_MEDIUM, S(20), "achievement")
-        draw.text((b.x, b.y), f"{entry.score.achievement:.4f}%", font=achievement_font, fill=fg)
+        with op("achievement"):
+            achievement_font = card_layout.font(_JP_MEDIUM, S(20), "achievement")
+            _draw_text(draw, card_layout.style("achievement"), (b.x, b.y), f"{entry.score.achievement:.4f}%", achievement_font, fg)
 
     if b := box("difficulty_name"):
-        diff_name = entry.sheet.difficulty.display_name if entry.sheet.difficulty else "?"
-        diff_font = card_layout.font(_JP_REGULAR, S(16), "difficulty_name")
-        draw.text((b.x, b.y), diff_name, font=diff_font, fill=palette["sub_fg"])
+        with op("difficulty_name"):
+            diff_name = entry.sheet.difficulty.display_name if entry.sheet.difficulty else "?"
+            diff_font = card_layout.font(_JP_REGULAR, S(16), "difficulty_name")
+            _draw_text(draw, card_layout.style("difficulty_name"), (b.x, b.y), diff_name, diff_font, palette["sub_fg"])
 
     # combo/sync badges. With collapse_badges, a chart with no sync flag
     # draws its combo badge in the sync slot instead of leaving a gap.
     sync_box, combo_box = box("sync_icon"), box("combo_icon")
     if entry.score.sync_flag is not None and sync_box:
-        _paste_icon(base, badge_icons.get(f"sync:{entry.score.sync_flag.value}"), (sync_box.x, sync_box.y), sync_box.h)
+        with op("sync_icon"):
+            _paste_icon(base, badge_icons.get(f"sync:{entry.score.sync_flag.value}"), (sync_box.x, sync_box.y), sync_box.h)
     if entry.score.combo_flag is not None and combo_box:
+        combo_name = "combo_icon"
         if entry.score.sync_flag is None and sync_box and layout.options.get("collapse_badges", True):
             combo_box = sync_box
-        _paste_icon(base, badge_icons.get(f"combo:{entry.score.combo_flag.value}"), (combo_box.x, combo_box.y), combo_box.h)
+        with op(combo_name):
+            _paste_icon(base, badge_icons.get(f"combo:{entry.score.combo_flag.value}"), (combo_box.x, combo_box.y), combo_box.h)
 
     # chart rating value - the card's actual contribution to the b50 total,
     # right-aligned in its box. Bigger/bolder than the achievement % with a
     # thin dark stroke so it stays legible against every card's gradient
     # (including the light remaster palette).
     if b := box("rating_value"):
-        k = card_layout.scale("rating_value")
-        rating_font = font(_INTER_BOLD, round(S(32) * k))
-        rating_text = f"{entry.rating}"
-        rating_w = draw.textlength(rating_text, font=rating_font)
-        draw.text(
-            (b.right - rating_w, b.y),
-            rating_text,
-            font=rating_font,
-            fill=RATING_ACCENT_COLOR,
-            stroke_width=max(1, round(S(1) * k)),
-            stroke_fill=(20, 20, 20),
-        )
+        with op("rating_value"):
+            k = card_layout.scale("rating_value")
+            rating_font = font(_INTER_BOLD, round(S(32) * k))
+            rating_text = f"{entry.rating}"
+            rating_w = draw.textlength(rating_text, font=rating_font)
+            _draw_text(
+                draw,
+                card_layout.style("rating_value"),
+                (b.right - rating_w, b.y),
+                rating_text,
+                rating_font,
+                RATING_ACCENT_COLOR,
+                stroke_width=max(1, round(S(1) * k)),
+                stroke_fill=(20, 20, 20),
+            )
 
     if b := box("rank_number"):
-        draw.text((b.x, b.y), f"#{rank_in_section}", font=card_layout.font(_INTER_REGULAR, S(14), "rank_number"), fill=fg)
+        with op("rank_number"):
+            _draw_text(
+                draw,
+                card_layout.style("rank_number"),
+                (b.x, b.y),
+                f"#{rank_in_section}",
+                card_layout.font(_INTER_REGULAR, S(14), "rank_number"),
+                fg,
+            )
 
 
 def _render_grid(
@@ -724,7 +820,7 @@ def _render_grid(
 
 
 def _render_section_header(
-    draw: ImageDraw.ImageDraw, layout: Layout, name: str, label: str, color: tuple[int, int, int]
+    image: Image.Image, draw: ImageDraw.ImageDraw, layout: Layout, name: str, label: str, color: tuple[int, int, int]
 ) -> None:
     """Colored accent bar + label above a grid, so the B35/older vs
     B15/current split reads clearly at a glance instead of just as
@@ -732,8 +828,14 @@ def _render_section_header(
     box = layout.box(name)
     if box is None:
         return
-    draw.rectangle([(box.x, box.y), (box.right, box.y + layout.s(S(4), name))], fill=color)
-    draw.text((box.x, box.y + layout.s(S(10), name)), label, font=layout.font(_INTER_BOLD, S(16), name), fill=color)
+    style = layout.style(name)
+    if style["color"] is not None:
+        color = style["color"]
+    with _opacity(image, style["opacity"], _pad_box(box, S(20))):
+        draw.rectangle([(box.x, box.y), (box.right, box.y + layout.s(S(4), name))], fill=color)
+        _draw_text(
+            draw, style, (box.x, box.y + layout.s(S(10), name)), label, layout.font(_INTER_BOLD, S(16), name), color
+        )
 
 
 def render_b50(
@@ -775,6 +877,7 @@ def render_b50(
             try:
                 with Image.open(io.BytesIO(version_logo_bytes)) as logo_src:
                     logo = _scale_to_height(logo_src.convert("RGBA"), box.h)
+                with _opacity(image, layout.style("version_logo")["opacity"], _pad_box(box, logo.width)):
                     image.paste(logo, (box.right - logo.width, box.y), logo)
             except Exception:
                 pass
@@ -784,59 +887,68 @@ def render_b50(
         box = layout.box(name)
         if box is None:
             continue
-        value_font = layout.font(_INTER_BOLD, S(30), name)
-        label_font = layout.font(_INTER_REGULAR, S(14), name)
-        value_text = str(value)
-        value_w = draw.textlength(value_text, font=value_font)
-        label_w = draw.textlength(label, font=label_font)
-        draw.text((box.x + (box.w - value_w) / 2, box.y), value_text, font=value_font, fill=(255, 255, 255))
-        draw.text((box.x + (box.w - label_w) / 2, box.y + layout.s(S(40), name)), label, font=label_font, fill=(180, 180, 190))
+        style = layout.style(name)
+        with _opacity(image, style["opacity"], _pad_box(box, S(20))):
+            value_font = layout.font(_INTER_BOLD, S(30), name)
+            label_font = layout.font(_INTER_REGULAR, S(14), name)
+            value_text = str(value)
+            value_w = draw.textlength(value_text, font=value_font)
+            label_w = draw.textlength(label, font=label_font)
+            _draw_text(draw, style, (box.x + (box.w - value_w) / 2, box.y), value_text, value_font, (255, 255, 255))
+            _draw_text(
+                draw, style, (box.x + (box.w - label_w) / 2, box.y + layout.s(S(40), name)), label, label_font, (180, 180, 190)
+            )
 
     # slight round, not a full circle - same convention as /cc-display's icon.
     if box := layout.box("icon"):
         icon_size = min(box.w, box.h)
-        icon_mask = _rounded_mask((icon_size, icon_size), S(10))
-        pasted_icon = False
-        if icon_bytes:
-            try:
-                with Image.open(io.BytesIO(icon_bytes)) as src:
-                    scaled = _scale_to_height(src.convert("RGBA"), icon_size)
-                    left = max(0, (scaled.width - icon_size) // 2)
-                    cropped = scaled.crop((left, 0, left + icon_size, icon_size))
-                    image.paste(cropped, (box.x, box.y), icon_mask)
-                    pasted_icon = True
-            except Exception:
-                pasted_icon = False
-        if not pasted_icon:
-            placeholder = Image.new("RGB", (icon_size, icon_size), (200, 200, 205))
-            image.paste(placeholder, (box.x, box.y), icon_mask)
+        with _opacity(image, layout.style("icon")["opacity"], _pad_box(box, 0)):
+            icon_mask = _rounded_mask((icon_size, icon_size), S(10))
+            pasted_icon = False
+            if icon_bytes:
+                try:
+                    with Image.open(io.BytesIO(icon_bytes)) as src:
+                        scaled = _scale_to_height(src.convert("RGBA"), icon_size)
+                        left = max(0, (scaled.width - icon_size) // 2)
+                        cropped = scaled.crop((left, 0, left + icon_size, icon_size))
+                        image.paste(cropped, (box.x, box.y), icon_mask)
+                        pasted_icon = True
+                except Exception:
+                    pasted_icon = False
+            if not pasted_icon:
+                placeholder = Image.new("RGB", (icon_size, icon_size), (200, 200, 205))
+                image.paste(placeholder, (box.x, box.y), icon_mask)
 
     # name vertically centred in its box, truncated to the box width - the
     # rating badge follows wherever the name actually ends.
     if box := layout.box("name"):
-        name_font = layout.font(_JP_BOLD, S(40), "name")
-        name = _truncate_to_width(draw, player_name, name_font, max(S(40), box.w))
-        draw.text((box.x, box.y + box.h / 2), name, font=name_font, fill=(255, 255, 255), anchor="lm")
+        style = layout.style("name")
+        with _opacity(image, style["opacity"], _pad_box(box, S(20))):
+            name_font = layout.font(_JP_BOLD, S(40), "name")
+            name = _truncate_to_width(draw, player_name, name_font, max(S(40), box.w))
+            _draw_text(draw, style, (box.x, box.y + box.h / 2), name, name_font, (255, 255, 255), anchor="lm")
         layout.drawn("name", box.x + round(draw.textlength(name, font=name_font)))
     else:
         layout.drawn("name", None)
 
     if box := layout.box("rating_badge"):
-        rating_text = str(rating) if rating is not None else "?"
-        rating_w = _paste_rating_badge(image, draw, rating_badge_bytes, rating_text, (box.x, box.y), box.h, RATING_ACCENT_COLOR)
-        if rating_w == 0:
-            fallback_font = layout.font(_INTER_BOLD, S(26), "rating_badge")
-            draw.text(
-                (box.x, box.y + box.h / 2), f"Rating {rating_text}", font=fallback_font, fill=RATING_ACCENT_COLOR, anchor="lm"
-            )
+        with _opacity(image, layout.style("rating_badge")["opacity"], _pad_box(box, max(box.w, 4 * box.h))):
+            rating_text = str(rating) if rating is not None else "?"
+            rating_w = _paste_rating_badge(image, draw, rating_badge_bytes, rating_text, (box.x, box.y), box.h, RATING_ACCENT_COLOR)
+            if rating_w == 0:
+                fallback_font = layout.font(_INTER_BOLD, S(26), "rating_badge")
+                draw.text(
+                    (box.x, box.y + box.h / 2), f"Rating {rating_text}", font=fallback_font, fill=RATING_ACCENT_COLOR, anchor="lm"
+                )
 
     # B35 grid (older-version bests) and B15 grid (current-version bests),
     # each under its own accent-colored label band, with a vertical rule
     # between them by default.
-    _render_section_header(draw, layout, "section_b35", "BEST 35 · OLDER VERSIONS", _SECTION_OLD_COLOR)
-    _render_section_header(draw, layout, "section_b15", f"BEST 15 · {b15_version_label}", _SECTION_NEW_COLOR)
+    _render_section_header(image, draw, layout, "section_b35", "BEST 35 · OLDER VERSIONS", _SECTION_OLD_COLOR)
+    _render_section_header(image, draw, layout, "section_b15", f"BEST 15 · {b15_version_label}", _SECTION_NEW_COLOR)
     if box := layout.box("divider"):
-        draw.rectangle([(box.x, box.y), (box.right, box.bottom)], fill=_DIVIDER_COLOR)
+        with _opacity(image, layout.style("divider")["opacity"], _pad_box(box, 0)):
+            draw.rectangle([(box.x, box.y), (box.right, box.bottom)], fill=_DIVIDER_COLOR)
     for name, entries, cols in (("grid_b35", result.b35, B35_COLS), ("grid_b15", result.b15, B15_COLS)):
         if box := layout.box(name):
             _render_grid(image, entries, jackets_by_title, box.x, box.y, cols, badge_icons, layout)

@@ -15,6 +15,7 @@ after adding or moving an element, or the editor drifts from the renderer.
 """
 
 import io
+import re
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import NamedTuple
@@ -25,6 +26,15 @@ LAYOUT_VERSION = 1
 
 # attributes an element may carry, besides its box
 _BOX_KEYS = ("x", "y", "w", "h")
+
+# per-element style keys (opacity on any element; the colour/outline ones
+# only mean something on text elements - see each renderer's TEXT_ELEMENTS)
+_HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
+OUTLINE_WIDTH_MAX = 32
+
+
+def hex_to_rgb(value: str) -> tuple[int, int, int]:
+    return int(value[1:3], 16), int(value[3:5], 16), int(value[5:7], 16)
 
 
 @dataclass(slots=True, frozen=True)
@@ -78,6 +88,16 @@ def _merge_elements(defaults: dict, user: dict | None, scale: float) -> dict:
                 element["follow"] = override["follow"] if override["follow"] in defaults else None
             if isinstance(override.get("gap"), (int, float)):
                 element["gap"] = round(override["gap"] * scale)
+            opacity = override.get("opacity")
+            if isinstance(opacity, (int, float)) and not isinstance(opacity, bool) and 0 <= opacity <= 1:
+                element["opacity"] = float(opacity)
+            for key in ("color", "outline_color"):
+                value = override.get(key)
+                if isinstance(value, str) and _HEX_COLOR.match(value):
+                    element[key] = value.lower()
+            width = override.get("outline_width")
+            if isinstance(width, (int, float)) and not isinstance(width, bool) and 0 <= width <= OUTLINE_WIDTH_MAX:
+                element["outline_width"] = width * scale
         merged[name] = element
     return merged
 
@@ -168,6 +188,21 @@ class Layout:
 
     def raw(self, name: str) -> dict:
         return self._elements[name]
+
+    def style(self, name: str) -> dict:
+        """The element's style overrides, resolved for drawing. Keys are
+        always present: `opacity` (1.0 when unset), `color` and
+        `outline_color` as RGB tuples or None (use the renderer's default),
+        `outline_width` in output px (scaled like the element's fonts) or
+        None (use the renderer's default)."""
+        element = self._elements[name]
+        width = element.get("outline_width")
+        return {
+            "opacity": element.get("opacity", 1.0),
+            "color": hex_to_rgb(element["color"]) if "color" in element else None,
+            "outline_color": hex_to_rgb(element["outline_color"]) if "outline_color" in element else None,
+            "outline_width": None if width is None else width * self.scale(name),
+        }
 
 
 def _fit_to_width(img: Image.Image, width: int) -> Image.Image:
