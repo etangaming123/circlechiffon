@@ -14,133 +14,223 @@
 		<link href="siteresources/style.css" rel="stylesheet">
 		<link href="siteresources/template-editor.css" rel="stylesheet">
 	</head>
-	<body>
+	<body class="editor-page">
 		<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
 			<a class="navbar-brand" href="index.html">CiRCLE Chiffon</a>
 			<a class="navbar-brand" href="https://github.com/etangaming123/circlechiffon">[view on GitHub]</a>
 		</nav>
 
-		<div class="container-fluid mt-3" id="editor">
-			<div class="row">
-				<aside class="col-lg-3 col-md-5 mb-3" id="sidebar">
-					<h1 class="h4">Template Editor</h1>
-					<p class="small muted">
-						Everything stays in your browser: images and layouts are never uploaded from this page.
-						When you're done, export <code>layout.json</code> and send it with your images through
-						<code>/cc-template-upload</code>. This preview is approximate (boxes, not the real render),
-						so check the real thing with <code>/cc-template-preview</code>.
-					</p>
+		<div id="editor">
+			<aside id="sidebar" aria-label="Editor controls">
+				<header class="sb-head">
+					<div class="d-flex align-items-center justify-content-between">
+						<h1 class="h5 mb-0">Template Editor</h1>
+						<button type="button" class="btn btn-outline-light btn-sm" id="guide-btn" title="How to use the editor (?)">? Guide</button>
+					</div>
+					<label class="small mb-0 mt-2" for="kind-select">Render</label>
+					<select id="kind-select" class="form-control form-control-sm"></select>
+					<div class="btn-group btn-group-sm btn-group-toggle mt-2 d-none" id="view-toggle" role="group" aria-label="Which layout to edit">
+						<button type="button" class="btn btn-outline-light active" data-view="page">Page</button>
+						<button type="button" class="btn btn-outline-light" data-view="card">Card (all 50)</button>
+					</div>
+					<div class="btn-row mt-2">
+						<button type="button" class="btn btn-success btn-sm" id="export-btn">Export layout.json</button>
+						<label class="btn btn-outline-light btn-sm mb-0" for="import-input">Import…</label>
+						<input type="file" id="import-input" accept="application/json,.json" class="d-none">
+						<button type="button" class="btn btn-outline-danger btn-sm" id="reset-btn">Reset</button>
+					</div>
+				</header>
 
-					<section class="panel">
-						<label for="kind-select">Render</label>
-						<select id="kind-select" class="form-control form-control-sm"></select>
-						<div class="btn-group btn-group-sm btn-group-toggle mt-2 d-none" id="view-toggle" role="group" aria-label="Which layout to edit">
-							<button type="button" class="btn btn-outline-light active" data-view="page">Page</button>
-							<button type="button" class="btn btn-outline-light" data-view="card">Card (all 50)</button>
-						</div>
-						<p class="small muted mt-2 mb-0" id="canvas-size"></p>
-					</section>
+				<nav class="sb-tabs" role="tablist" aria-label="Editor sections">
+					<button type="button" role="tab" id="tab-template" data-tab="template" aria-controls="pane-template" aria-selected="true" class="active">Template</button>
+					<button type="button" role="tab" id="tab-elements" data-tab="elements" aria-controls="pane-elements" aria-selected="false">Elements</button>
+					<button type="button" role="tab" id="tab-inspector" data-tab="inspector" aria-controls="pane-inspector" aria-selected="false">Inspector</button>
+					<button type="button" role="tab" id="tab-guide" data-tab="guide" aria-controls="pane-guide" aria-selected="false">Guide</button>
+				</nav>
 
-					<section class="panel">
-						<h2 class="h6">Images</h2>
-						<label class="file-label">Base (drawn under the render)
-							<input type="file" id="base-input" accept="image/png,image/jpeg,image/webp" class="form-control-file form-control-sm">
-						</label>
-						<label class="file-label">Top (drawn over the render)
-							<input type="file" id="top-input" accept="image/png,image/jpeg,image/webp" class="form-control-file form-control-sm">
-						</label>
-						<div class="toggles">
-							<label><input type="checkbox" id="show-base" checked> Base</label>
-							<label><input type="checkbox" id="show-top" checked> Top</label>
-							<label><input type="checkbox" id="show-labels" checked> Labels</label>
-						</div>
-					</section>
-
-					<section class="panel">
-						<h2 class="h6">Layout</h2>
-						<div class="btn-row">
-							<button type="button" class="btn btn-success btn-sm" id="export-btn">Export layout.json</button>
-							<label class="btn btn-outline-light btn-sm mb-0" for="import-input">Import…</label>
-							<input type="file" id="import-input" accept="application/json,.json" class="d-none">
-							<button type="button" class="btn btn-outline-danger btn-sm" id="reset-btn">Reset</button>
-						</div>
-						<label class="mt-2 small" for="snap-input">Snap to grid (px, 0 = off)</label>
-						<input type="number" id="snap-input" class="form-control form-control-sm" min="0" max="200" value="0">
-						<div id="options" class="mt-2"></div>
-						<p class="small status" id="status" role="status" aria-live="polite"></p>
-					</section>
-
-					<section class="panel" id="selection-panel">
-						<h2 class="h6" id="selection-title">No element selected</h2>
-						<p class="small muted" id="selection-hint">Click an element on the canvas or in the list below. Arrow keys nudge it (Shift: ×10).</p>
-						<div id="selection-fields" class="d-none">
-							<div id="geometry-fields">
-							<div class="form-row">
-								<div class="col"><label class="small" for="f-x">x</label><input type="number" id="f-x" class="form-control form-control-sm"></div>
-								<div class="col"><label class="small" for="f-y">y</label><input type="number" id="f-y" class="form-control form-control-sm"></div>
-								<div class="col"><label class="small" for="f-w">w</label><input type="number" id="f-w" class="form-control form-control-sm" min="1"></div>
-								<div class="col"><label class="small" for="f-h">h</label><input type="number" id="f-h" class="form-control form-control-sm" min="1"></div>
-							</div>
-							<div id="follow-row" class="form-row mt-1">
-								<div class="col-7">
-									<label class="small" for="f-follow">Follow (sits right after)</label>
-									<select id="f-follow" class="form-control form-control-sm"></select>
+				<div class="sb-body">
+					<!-- TEMPLATE -->
+					<section class="sb-pane" id="pane-template" role="tabpanel" aria-labelledby="tab-template">
+						<div class="panel">
+							<h2 class="h6">Images</h2>
+							<div class="img-pick">
+								<span class="small">Base <span class="muted">(under the render)</span></span>
+								<div class="d-flex align-items-center">
+									<label class="btn btn-outline-light btn-sm mb-0" for="base-input">Choose…</label>
+									<input type="file" id="base-input" accept="image/png,image/jpeg,image/webp" class="d-none">
+									<span class="file-name small muted" id="base-name">none</span>
+									<button type="button" class="btn btn-outline-light btn-sm d-none" id="base-clear" title="Remove base image" aria-label="Remove base image">&times;</button>
 								</div>
-								<div class="col-5"><label class="small" for="f-gap">gap</label><input type="number" id="f-gap" class="form-control form-control-sm"></div>
 							</div>
-							</div>
-							<p class="small muted mt-2 mb-0 d-none" id="multi-note">Several elements selected: drag or arrow keys move them together; visibility, opacity and text style apply to all.</p>
-							<label class="mt-2"><input type="checkbox" id="f-visible"> Visible</label>
-							<div class="mt-2">
-								<label class="small mb-0" for="f-opacity">Opacity <span id="f-opacity-val">100%</span></label>
-								<input type="range" id="f-opacity" class="custom-range" min="0" max="100" step="1" value="100">
-							</div>
-							<div id="text-style" class="d-none mt-1">
-								<div class="text-preview-box"><span id="text-preview">Text preview 123</span></div>
-								<div class="form-row">
-									<div class="col-6">
-										<label class="small mb-0" for="f-color">Text colour</label>
-										<div class="d-flex"><input type="color" id="f-color" class="form-control form-control-sm p-0"><button type="button" class="btn btn-outline-light btn-sm ml-1" id="f-color-reset" title="Use default colour">&#x21BA;</button></div>
-									</div>
-									<div class="col-6">
-										<label class="small mb-0" for="f-outline-color">Outline colour</label>
-										<div class="d-flex"><input type="color" id="f-outline-color" class="form-control form-control-sm p-0"><button type="button" class="btn btn-outline-light btn-sm ml-1" id="f-outline-color-reset" title="Use default outline colour">&#x21BA;</button></div>
-									</div>
+							<div class="img-pick">
+								<span class="small">Top <span class="muted">(over the render)</span></span>
+								<div class="d-flex align-items-center">
+									<label class="btn btn-outline-light btn-sm mb-0" for="top-input">Choose…</label>
+									<input type="file" id="top-input" accept="image/png,image/jpeg,image/webp" class="d-none">
+									<span class="file-name small muted" id="top-name">none</span>
+									<button type="button" class="btn btn-outline-light btn-sm d-none" id="top-clear" title="Remove top image" aria-label="Remove top image">&times;</button>
 								</div>
-								<label class="small mb-0 mt-1" for="f-outline-width">Outline width <span id="f-outline-width-val">default</span></label>
-								<div class="d-flex"><input type="range" id="f-outline-width" class="custom-range" min="0" max="32" step="0.5" value="0"><button type="button" class="btn btn-outline-light btn-sm ml-1" id="f-outline-width-reset" title="Use default outline">&#x21BA;</button></div>
 							</div>
-							<p class="small muted mt-1 mb-0" id="resize-note"></p>
+							<p class="small muted mb-0 mt-2">Images stay in your browser and are never uploaded. You can also drop an image on the canvas (Base; hold Shift for Top).</p>
+						</div>
+
+						<div class="panel" id="options-panel">
+							<h2 class="h6">Options</h2>
+							<div id="options"></div>
+						</div>
+
+						<div class="panel d-none" id="colors-panel">
+							<h2 class="h6">Colours &amp; opacity</h2>
+							<p class="small muted">Layout-wide settings, not tied to one element. &#x21BA; restores the stock value.</p>
+							<div id="colors"></div>
 						</div>
 					</section>
 
-					<section class="panel d-none" id="colors-panel">
-						<h2 class="h6">Colours &amp; opacity</h2>
-						<p class="small muted">Layout-wide settings, not tied to one element. &#x21BA; restores the stock colour.</p>
-						<div id="colors"></div>
-					</section>
-
-					<section class="panel">
-						<h2 class="h6">Elements</h2>
-						<p class="small muted mb-1">Shift/Ctrl/Cmd-click to select several.</p>
+					<!-- ELEMENTS -->
+					<section class="sb-pane d-none" id="pane-elements" role="tabpanel" aria-labelledby="tab-elements">
+						<input type="search" id="element-filter" class="form-control form-control-sm mb-2" placeholder="Filter elements…" aria-label="Filter elements">
 						<div class="btn-row mb-2">
 							<button type="button" class="btn btn-outline-light btn-sm" id="select-all">Select all</button>
 							<button type="button" class="btn btn-outline-light btn-sm" id="select-none">Clear</button>
 						</div>
+						<p class="small muted mb-1">Shift/Ctrl/Cmd-click to select several. Tick the box to show or hide one.</p>
 						<ul id="element-list" class="list-unstyled mb-0"></ul>
 					</section>
-				</aside>
 
-				<main class="col-lg-9 col-md-7">
-					<div class="zoom-row">
-						<span class="small muted">Zoom</span>
-						<div class="btn-group btn-group-sm" role="group" aria-label="Zoom">
-							<button type="button" class="btn btn-outline-light active" data-zoom="fit">Fit</button>
-							<button type="button" class="btn btn-outline-light" data-zoom="0.25">25%</button>
-							<button type="button" class="btn btn-outline-light" data-zoom="0.5">50%</button>
-							<button type="button" class="btn btn-outline-light" data-zoom="1">100%</button>
+					<!-- INSPECTOR -->
+					<section class="sb-pane d-none" id="pane-inspector" role="tabpanel" aria-labelledby="tab-inspector">
+						<h2 class="h6" id="selection-title">No element selected</h2>
+						<div class="empty-state" id="selection-hint">
+							<p class="mb-1">Nothing selected.</p>
+							<p class="small muted mb-0">Click an element on the canvas or pick one in the <strong>Elements</strong> tab. Arrow keys nudge it (Shift: &times;10).</p>
 						</div>
+						<div id="selection-fields" class="d-none">
+							<p class="small muted d-none" id="multi-note">Several elements selected: drag or arrow keys move them together; visibility, opacity and text style apply to all.</p>
+
+							<details class="group" open id="geometry-fields">
+								<summary>Position &amp; size</summary>
+								<div class="group-body">
+									<div class="form-row">
+										<div class="col"><label class="small" for="f-x">x</label><input type="number" id="f-x" class="form-control form-control-sm"></div>
+										<div class="col"><label class="small" for="f-y">y</label><input type="number" id="f-y" class="form-control form-control-sm"></div>
+										<div class="col"><label class="small" for="f-w">w</label><input type="number" id="f-w" class="form-control form-control-sm" min="1"></div>
+										<div class="col"><label class="small" for="f-h">h</label><input type="number" id="f-h" class="form-control form-control-sm" min="1"></div>
+									</div>
+									<div id="follow-row" class="form-row mt-2">
+										<div class="col-7">
+											<label class="small" for="f-follow">Follow (sits right after)</label>
+											<select id="f-follow" class="form-control form-control-sm"></select>
+										</div>
+										<div class="col-5"><label class="small" for="f-gap">gap</label><input type="number" id="f-gap" class="form-control form-control-sm"></div>
+									</div>
+									<p class="small muted mt-2 mb-0" id="resize-note"></p>
+								</div>
+							</details>
+
+							<details class="group" open>
+								<summary>Appearance</summary>
+								<div class="group-body">
+									<label class="mb-2"><input type="checkbox" id="f-visible"> Visible</label>
+									<label class="small mb-0 d-block" for="f-opacity">Opacity <span id="f-opacity-val">100%</span></label>
+									<input type="range" id="f-opacity" class="custom-range" min="0" max="100" step="1" value="100">
+								</div>
+							</details>
+
+							<details class="group" open>
+								<summary>Text style</summary>
+								<fieldset id="text-style" class="group-body">
+									<p class="small muted" id="text-style-note">Only text elements have a colour and outline.</p>
+									<div class="text-preview-box"><span id="text-preview">999,999</span></div>
+									<div class="form-row">
+										<div class="col-6">
+											<label class="small mb-0" for="f-color">Text colour</label>
+											<div class="d-flex"><input type="color" id="f-color" class="form-control form-control-sm p-0"><button type="button" class="btn btn-outline-light btn-sm ml-1" id="f-color-reset" title="Use default colour">&#x21BA;</button></div>
+										</div>
+										<div class="col-6">
+											<label class="small mb-0" for="f-outline-color">Outline colour</label>
+											<div class="d-flex"><input type="color" id="f-outline-color" class="form-control form-control-sm p-0"><button type="button" class="btn btn-outline-light btn-sm ml-1" id="f-outline-color-reset" title="Use default outline colour">&#x21BA;</button></div>
+										</div>
+									</div>
+									<label class="small mb-0 mt-2" for="f-outline-width">Outline width <span id="f-outline-width-val">default</span></label>
+									<div class="d-flex"><input type="range" id="f-outline-width" class="custom-range" min="0" max="32" step="0.5" value="0"><button type="button" class="btn btn-outline-light btn-sm ml-1" id="f-outline-width-reset" title="Use default outline">&#x21BA;</button></div>
+								</fieldset>
+							</details>
+						</div>
+					</section>
+
+					<!-- GUIDE -->
+					<section class="sb-pane d-none guide" id="pane-guide" role="tabpanel" aria-labelledby="tab-guide">
+						<h2 class="h6">Quick start</h2>
+						<ol class="guide-steps">
+							<li><strong>Pick a render</strong> at the top: Best 50, Profile core or Profile extra. Best 50 also has a <em>Card</em> view for the one layout shared by all 50 cards.</li>
+							<li><strong>Load your art</strong> in <em>Template</em>: a Base image (drawn under the render) and/or a Top image (drawn over it). Get a guide PNG from <code>/cc-template-get</code> to draw over.</li>
+							<li><strong>Move things.</strong> Drag an element, pull its handles to resize, or type exact numbers in <em>Inspector</em>. Hide what you don't want with the checkbox in <em>Elements</em>.</li>
+							<li><strong>Style it.</strong> Opacity for any element; colour and outline for text. <em>Template</em> holds layout-wide colours and options.</li>
+							<li><strong>Check it in Live.</strong> Switch the canvas from <em>Edit</em> to <em>Live</em> to see placeholder text (<code>999,999</code>, <code>100.5000%</code>, a very long chart name) over your art.</li>
+							<li><strong>Export</strong> <code>layout.json</code>, then run <code>/cc-template-upload</code> with it and your images. Verify the real thing with <code>/cc-template-preview</code>.</li>
+						</ol>
+
+						<h2 class="h6 mt-3">Shortcuts</h2>
+						<table class="table table-sm table-borderless guide-keys">
+							<tbody>
+								<tr><td><kbd>&larr;</kbd><kbd>&uarr;</kbd><kbd>&rarr;</kbd><kbd>&darr;</kbd></td><td>Nudge selection 1px (<kbd>Shift</kbd> = 10px)</td></tr>
+								<tr><td><kbd>Shift</kbd>/<kbd>Ctrl</kbd>/<kbd>Cmd</kbd> click</td><td>Add or remove from selection</td></tr>
+								<tr><td><kbd>Esc</kbd></td><td>Clear selection</td></tr>
+								<tr><td><kbd>Ctrl/Cmd</kbd>+<kbd>Z</kbd></td><td>Undo (<kbd>Shift</kbd> added: redo)</td></tr>
+								<tr><td><kbd>L</kbd></td><td>Toggle Edit / Live</td></tr>
+								<tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>Select previous / next element</td></tr>
+								<tr><td><kbd>?</kbd></td><td>Open this guide</td></tr>
+							</tbody>
+						</table>
+
+						<h2 class="h6 mt-3">Good to know</h2>
+						<ul class="small guide-faq">
+							<li><strong>Nothing is uploaded.</strong> Images and layouts stay in your browser. Your layout autosaves here for each render.</li>
+							<li><strong>Live is approximate.</strong> Fonts and sizes are close, not identical. Image elements (icon, jacket, badges) show as tinted blocks. <code>/cc-template-preview</code> is the truth.</li>
+							<li><strong>Dashed outline = follows.</strong> Some elements sit right after another (the rating badge follows the name). Dragging one sideways, or typing an x, pins it.</li>
+							<li><strong>Snap</strong> in the canvas toolbar rounds drags to a grid (0 = off).</li>
+							<li><strong>Import</strong> an exported <code>layout.json</code> to keep working on it later.</li>
+						</ul>
+					</section>
+				</div>
+			</aside>
+
+			<main id="canvas-col">
+				<div class="toolbar" role="toolbar" aria-label="Canvas tools">
+					<div class="btn-group btn-group-sm" role="group" aria-label="Mode">
+						<button type="button" class="btn btn-outline-light active" id="mode-edit" aria-pressed="true" title="Boxes and handles">Edit</button>
+						<button type="button" class="btn btn-outline-light" id="mode-live" aria-pressed="false" title="Placeholder text over your art (L)">Live</button>
 					</div>
+					<div class="btn-group btn-group-sm" role="group" aria-label="Undo and redo">
+						<button type="button" class="btn btn-outline-light" id="undo-btn" title="Undo (Ctrl/Cmd+Z)" aria-label="Undo" disabled>&#x21B6;</button>
+						<button type="button" class="btn btn-outline-light" id="redo-btn" title="Redo (Ctrl/Cmd+Shift+Z)" aria-label="Redo" disabled>&#x21B7;</button>
+					</div>
+					<div class="btn-group btn-group-sm" role="group" aria-label="Zoom">
+						<button type="button" class="btn btn-outline-light active" data-zoom="fit">Fit</button>
+						<button type="button" class="btn btn-outline-light" data-zoom="0.25">25%</button>
+						<button type="button" class="btn btn-outline-light" data-zoom="0.5">50%</button>
+						<button type="button" class="btn btn-outline-light" data-zoom="1">100%</button>
+					</div>
+					<div class="toggles">
+						<label><input type="checkbox" id="show-base" checked> Base</label>
+						<label><input type="checkbox" id="show-top" checked> Top</label>
+						<label id="labels-toggle"><input type="checkbox" id="show-labels" checked> Labels</label>
+						<label class="snap-label">Snap <input type="number" id="snap-input" class="form-control form-control-sm" min="0" max="200" value="0" aria-label="Snap to grid in pixels, 0 is off"></label>
+					</div>
+					<span class="small muted ml-auto" id="canvas-size"></span>
+				</div>
+
+				<div id="welcome" class="welcome d-none" role="note">
+					<div>
+						<strong>New here?</strong> Drag elements around, then export <code>layout.json</code>. Everything stays in your browser.
+					</div>
+					<div class="btn-row">
+						<button type="button" class="btn btn-sm btn-warning" id="welcome-guide">Show me how</button>
+						<button type="button" class="btn btn-sm btn-outline-light" id="welcome-dismiss">Got it</button>
+					</div>
+				</div>
+
+				<div id="stage-area">
 					<div id="stage-scroll">
 						<div id="stage-wrap">
 							<div id="stage" tabindex="0" aria-label="Template canvas">
@@ -151,11 +241,13 @@
 							</div>
 						</div>
 					</div>
-				</main>
-			</div>
+					<p class="status" id="status" role="status" aria-live="polite"></p>
+					<p class="live-note small d-none" id="live-note">Approximate preview. Fonts and sizes differ slightly; check the real render with <code>/cc-template-preview</code>.</p>
+				</div>
+			</main>
 		</div>
 
-		<footer class="text-center mt-4">
+		<footer class="text-center mt-4 editor-footer">
 			<p>etan • etangaming123 • etangamingxyz</p>
 		</footer>
 

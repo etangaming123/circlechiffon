@@ -2,11 +2,16 @@
 
 ## What's verified, and what isn't
 
-There is no official maimai DX NET API — everything is HTML scraping — and no automated test suite.
+There is no official maimai DX NET API — everything is HTML scraping.
 
-**Unit-testable with no live account:** the rating calculator
-(`circlechiffon/ratingcalc/calculator.py`) and the song catalog/search
-(`circlechiffon/songdata/catalog.py`).
+**Covered by automated tests** (`pytest`, no live account or network needed): the rating formula and
+best-50 bucketing, the judgement-loss math, the simai chart parser and slide geometry, the song
+catalog and search, encryption at rest, command cooldowns/bans, the database migration, template
+upload validation, and friend-name matching. Run them with `python -m pytest` (install
+`requirements-dev.txt` first).
+
+**Not covered by tests:** the Discord commands themselves, anything that talks to maimai DX NET,
+and the image/video renderers (their output is checked by eye).
 
 **Confirmed live** against a real logged-in account: the session/re-login handling, the collection
 writes behind `/cc-preset-*`, and the friends selectors (`/cc-friends`, `/cc-friend-profile`,

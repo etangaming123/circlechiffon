@@ -24,7 +24,7 @@ A template has up to three parts, and each one is optional:
 2. Run `/cc-template-get` to get a **guide PNG**: a transparent image at the real canvas size, with every element outlined and labelled. Design your base and top art over it in any image editor.
 3. Open the [template editor](https://cc.etangaming.xyz/template-editor.html) and load your images. Drag elements around, resize them with the handles, hide what you don't want, then click **Export layout.json**. The editor runs entirely in your browser, and nothing you load into it is uploaded.
 4. `/cc-template-upload kind:<…> base:<file> top:<file> layout:<file>` (attach any subset of the three).
-5. `/cc-template-preview` renders your template with fixed sample data, so you don't need a linked account. Add `guides:True` to draw the element outlines on top.
+5. `/cc-template-preview` renders your template with randomised placeholder data (a very long title, `100.5000%`, big counts and so on), so you don't need a linked account and it renders quickly. Add `guides:True` to draw the element outlines on top.
 
 `/cc-template-remove` deletes one part or all of them. If you're removed from the whitelist, your files stay on disk but stop being used.
 
@@ -49,7 +49,11 @@ A template has up to three parts, and each one is optional:
 - **Multi-select**: Shift/Ctrl/Cmd-click elements (on the canvas or in the list), or use *Select all*. Dragging or the arrow keys move the whole selection; visibility, opacity and text style apply to all of it at once. Position, size and follow need a single element.
 - **Colours**: profile renders have layout-wide colour slots (count pill, class point bar, mission rows and so on), listed in the *Colours* panel. They aren't tied to one element. Each has a reset to the stock colour.
 - **Opacity / text style**: every element has an opacity slider (100% = untouched). Text elements also get a text colour, an outline colour and an outline width. Each has a reset button that goes back to the stock look. On the card view, `card_bg` is the card's background gradient, so its slider fades the whole card.
-- The editor shows boxes, not the real render. Use `/cc-template-preview` to see the real output.
+- **Edit / Live**: *Edit* shows element boxes and handles. *Live* hides the boxes and draws placeholder text (`999,999`, `100.5000%`, a very long chart name, ...) over your base and top images, so you can judge colours, outlines and fit. Image elements (icon, jacket, badges) stay as faint blocks. Press `L` to toggle.
+- **Layout of the page**: the sidebar has its own scroll and four tabs (*Template*: images, options, layout-wide colours; *Elements*: list and filter; *Inspector*: position, appearance and text style of the selection; *Guide*). Clicking an element on the canvas opens the Inspector.
+- **Undo / redo**: `Ctrl/Cmd+Z` and `Ctrl/Cmd+Shift+Z`, per render kind, including Import and Reset.
+- **Drag and drop**: drop a PNG/JPEG/WebP on the canvas to set the base image (hold Shift for the top image), or drop a `layout.json` to import it. `[` and `]` select the previous / next element.
+- Even in Live mode the editor is approximate: fonts and sizes are close to, not identical to, the real render. Use `/cc-template-preview` to see the real output.
 
 ## `layout.json` format
 
@@ -81,5 +85,5 @@ A template has up to three parts, and each one is optional:
 
 - Geometry lives in each renderer's `default_layout()` (`renderers/b50.py`, `renderers/profile.py`). Renderers read positions from a `Layout` (`renderers/layout.py`).
 - The kind registry and the guide renderer are in `renderers/guides.py`.
-- Upload checks are in `customisation/validate.py`, storage (`user_templates/<discord_id>/<kind>/`) and the whitelist in `customisation/store.py`, and `/cc-template-preview`'s sample data in `customisation/sample_data.py`.
+- Upload checks are in `customisation/validate.py`, storage (`user_templates/<discord_id>/<kind>/`) and the whitelist in `customisation/store.py`, and `/cc-template-preview`'s placeholder data in `customisation/sample_data.py`.
 - After adding or moving an element, run `python generate_templates.py`. It rewrites `siteresources/template-layouts.js` (the editor's defaults) and the guide PNGs.

@@ -261,7 +261,8 @@ class Scene:
         star_keys = {(_key(t.time), t.position) for t in chart.taps if t.is_star}
         self.slides: list[_SlideDraw] = []
         by_head: dict[tuple[int, int], list] = {}
-        for s in chart.slides:
+        # In time order: _draw_slides relies on it to put older slides on top.
+        for s in sorted(chart.slides, key=lambda s: (s.head_time, s.launch_time)):
             track = geometry.build_track(s, self.table)
             start = s.segments[0].start
             by_head.setdefault((_key(s.head_time), start), []).append((s, track))
@@ -393,6 +394,18 @@ class Scene:
             last[spot] = k
         self.fireworks = fireworks
 
+        # The hold effect runs while a hold or touch hold is held, so only
+        # when notes are hit.
+        held = []
+        if self.hit:
+            held += [(n.time, n.time + n.duration, geometry.key_point_u(n.position)) for n in self.holds]
+            held += [(n.time, n.time + n.duration, geometry.touch_point_u(n.area, n.index))
+                     for n in self.touches if n.duration is not None]
+        held.sort(key=lambda h: h[0])
+        self.hold_fx = held
+        self.hold_fx_start = np.array([h[0] for h in held])
+        self.hold_fx_end = np.array([h[1] for h in held])
+
     # -- per frame --------------------------------------------------------------
 
     def _approach(self, note_time: float, t: float) -> tuple[float, float]:
@@ -451,7 +464,9 @@ class Scene:
     def _draw_slides(self, canvas, t: float) -> None:
         painter = self.painter
         shine = self._break_brightness(t)
-        for i in self._active(self.slide_show, self.slide_hide, t):
+        # Oldest on top: newer slides are drawn first, and within a slide
+        # the end first, so a slide's start covers its end where they cross.
+        for i in reversed(self._active(self.slide_show, self.slide_hide, t)):
             d = self.slides[i]
             alpha = self._slide_alpha(d, t)
             b = shine if d.kind == "break" and t >= d.full else 1.0
@@ -462,7 +477,7 @@ class Scene:
                     first = int(11 * min((t - w.t0) / max(w.t1 - w.t0, 1e-6), 1.0))
                 painter.wifi_bars(canvas, w, first, alpha, d.kind, b)
                 continue
-            for seg in d.track.segments:
+            for seg in reversed(d.track.segments):
                 first = 0
                 if self.hit and t >= seg.t1:
                     continue
@@ -561,10 +576,12 @@ class Scene:
             tail_r = max(_SPAWN, min(self._approach(end, t)[0], head_r))
             if scale < 1.0:
                 head_r = tail_r = _SPAWN
-            if t < n.time:
-                state = "idle"
+            if self.hit:
+                state = "on" if t >= n.time else "idle"
             else:
-                state = "on" if self.hit else "off"
+                # A missed hold keeps its colour until MajdataPlay would
+                # judge the head a miss, then turns grey.
+                state = "off" if t >= n.time + _TAP_MISS_AFTER else "idle"
             b = shine if n.is_break else 1.0
             if state == "on":
                 b *= held
@@ -606,8 +623,8 @@ class Scene:
             b = shine if n.is_break else 1.0
             if n.duration is not None:
                 progress = (t - n.time) / n.duration if (t >= n.time and n.duration > 0) else None
-                painter.touch_hold(canvas, pos, d, alpha, kind, progress, not self.hit and t >= n.time, b,
-                                   n.firework)
+                missed = not self.hit and t >= n.time + _TOUCH_MISS_AFTER
+                painter.touch_hold(canvas, pos, d, alpha, kind, progress, missed, b, n.firework)
                 continue
             borders = []
             queue = queues.get((n.area, n.index), [])
@@ -619,6 +636,9 @@ class Scene:
 
     def _draw_effects(self, canvas, t: float) -> None:
         painter = self.painter
+        for k in self._active(self.hold_fx_start, self.hold_fx_end, t):
+            start, _, pos = self.hold_fx[k]
+            painter.hold_effect(canvas, pos, t - start)
         for k in self._recent(self.hit_times, t, 0.45):
             if t >= self.hit_until[k]:
                 continue
@@ -884,12 +904,15 @@ def _split(chart: Chart, whole: _Part, max_seconds: float | None) -> list[_Part]
 
 
 def _sfx_hits(chart: Chart, t_start: float, t_end: float) -> list[SfxHit]:
-    """One answer sound per moment a note is hit; the "each" sample when
-    several land together."""
+    """One answer sound per moment a note is hit or a hold (or touch hold)
+    is let go; the "each" sample when several land together."""
+    times = [n.time for n in [*chart.taps, *chart.holds, *chart.touches]]
+    times += [n.time + n.duration for n in chart.holds]
+    times += [n.time + n.duration for n in chart.touches if n.duration is not None]
     counts: dict[int, int] = {}
-    for n in [*chart.taps, *chart.holds, *chart.touches]:
-        if t_start <= n.time < t_end:
-            key = round(n.time * 1000)
+    for when in times:
+        if t_start <= when < t_end:
+            key = round(when * 1000)
             counts[key] = counts.get(key, 0) + 1
     return [
         SfxHit(time_ms=key - t_start * 1000.0, is_each=count > 1)

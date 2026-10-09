@@ -22,6 +22,22 @@
 		canvasSize: $("canvas-size"),
 		baseInput: $("base-input"),
 		topInput: $("top-input"),
+		baseName: $("base-name"),
+		topName: $("top-name"),
+		baseClear: $("base-clear"),
+		topClear: $("top-clear"),
+		modeEdit: $("mode-edit"),
+		modeLive: $("mode-live"),
+		liveNote: $("live-note"),
+		labelsToggle: $("labels-toggle"),
+		undoBtn: $("undo-btn"),
+		redoBtn: $("redo-btn"),
+		guideBtn: $("guide-btn"),
+		welcome: $("welcome"),
+		welcomeGuide: $("welcome-guide"),
+		welcomeDismiss: $("welcome-dismiss"),
+		filter: $("element-filter"),
+		textStyleNote: $("text-style-note"),
 		showBase: $("show-base"),
 		showTop: $("show-top"),
 		showLabels: $("show-labels"),
@@ -77,6 +93,8 @@
 		selected: null, // the primary (last-clicked) element
 		sel: new Set(), // every selected element, primary included
 		zoom: "fit",
+		live: false, // preview mode: placeholder text instead of bare boxes
+		tab: "template",
 		images: { base: null, top: null }, // object URLs, per session only
 	};
 
@@ -92,12 +110,114 @@
 	}
 
 	function save() {
+		commit();
 		try {
 			window.localStorage.setItem(STORAGE_PREFIX + state.kind, JSON.stringify(layout()));
 		} catch (e) {
 			// private mode / storage blocked - nothing to do
 		}
 	}
+
+	// per-viewer UI prefs (live mode, welcome banner); never required
+	function loadUi() {
+		try {
+			return JSON.parse(window.localStorage.getItem(STORAGE_PREFIX + "ui")) || {};
+		} catch (e) {
+			return {};
+		}
+	}
+
+	function saveUi(patch) {
+		try {
+			window.localStorage.setItem(STORAGE_PREFIX + "ui", JSON.stringify(Object.assign(loadUi(), patch)));
+		} catch (e) {
+			// ignore
+		}
+	}
+
+	// ---- undo / redo: JSON snapshots per kind. Edits landing within
+	// COALESCE_MS of each other (a slider drag, held arrow key) share one step.
+
+	const COALESCE_MS = 500;
+	const MAX_HISTORY = 100;
+	const history = {}; // kind -> { past: [], future: [], present: string, at: ms }
+
+	function resetHistory() {
+		history[state.kind] = { past: [], future: [], present: JSON.stringify(layout()), at: 0 };
+		updateHistoryButtons();
+	}
+
+	function commit() {
+		const h = history[state.kind];
+		if (!h || !state.layouts[state.kind]) return;
+		const now = JSON.stringify(layout());
+		if (now === h.present) return;
+		const t = Date.now();
+		if (t - h.at > COALESCE_MS) {
+			h.past.push(h.present);
+			if (h.past.length > MAX_HISTORY) h.past.shift();
+		}
+		h.present = now;
+		h.at = t;
+		h.future.length = 0;
+		updateHistoryButtons();
+	}
+
+	function updateHistoryButtons() {
+		const h = history[state.kind];
+		els.undoBtn.disabled = !h || !h.past.length;
+		els.redoBtn.disabled = !h || !h.future.length;
+	}
+
+	function stepHistory(dir) {
+		const h = history[state.kind];
+		if (!h) return;
+		const from = dir < 0 ? h.past : h.future;
+		if (!from.length) return;
+		(dir < 0 ? h.future : h.past).push(h.present);
+		h.present = from.pop();
+		h.at = 0;
+		state.layouts[state.kind] = JSON.parse(h.present);
+		try {
+			window.localStorage.setItem(STORAGE_PREFIX + state.kind, h.present);
+		} catch (e) {
+			// ignore
+		}
+		updateHistoryButtons();
+		renderOptions();
+		renderColors();
+		renderStage();
+	}
+
+	// What the Live preview shows in each text element: per kind, per view.
+	const PLACEHOLDERS = {
+		b50: {
+			page: {
+				name: "\uFF23\uFF49\uFF32\uFF23\uFF2C\uFF25",
+				stat_total: "999,999",
+				stat_b15: "99,999",
+				stat_b35: "999,999",
+				section_b35: "BEST 35 \u00B7 OLDER VERSIONS",
+				section_b15: "BEST 15 \u00B7 CURRENT VERSION",
+			},
+			card: {
+				type_tag: "DX",
+				level_badge: "15+",
+				title: "A really long chart name powered by CiRCLE Chiffon",
+				achievement: "100.5000%",
+				difficulty_name: "Re:MASTER",
+				rating_value: "999",
+				rank_number: "#50",
+			},
+		},
+	};
+	// font size as a fraction of the box height (the bot sizes text from the box)
+	const TEXT_RATIO = { stat_total: 0.55, stat_b15: 0.55, stat_b35: 0.55, achievement: 0.8, rating_value: 0.8, title: 0.78 };
+	const DEFAULT_TEXT_RATIO = 0.72;
+	const placeholder = (name) => {
+		const set = ((PLACEHOLDERS[state.kind] || {})[isCardView() ? "card" : "page"]) || {};
+		return set[name] || labels()[name] || name;
+	};
 
 	// ---- layout helpers
 
@@ -206,6 +326,7 @@
 		els.wrap.style.width = w * zoomFactor + "px";
 		els.wrap.style.height = h * zoomFactor + "px";
 		els.stage.classList.toggle("hide-labels", !els.showLabels.checked);
+		els.stage.classList.toggle("live", state.live);
 		els.canvasSize.textContent = isCardView()
 			? `Card: ${w}×${h}px, shared by all 50 cards. Positions are relative to the card's top-left.`
 			: `Canvas: ${w}×${h}px` + (spec().fixedSize ? " (images are stretched to this)" : " (images fit the width; height grows with the lists)");
@@ -289,7 +410,14 @@
 			node.classList.toggle("follows", !!el.follow);
 			node.classList.toggle("hidden-element", el.visible === false);
 			node.classList.toggle("selected", state.sel.has(name));
-			node.style.opacity = el.opacity == null ? "" : String(Math.max(0.15, el.opacity));
+			const isTxt = isText(name);
+			node.classList.toggle("text-el", isTxt);
+			node.classList.toggle("image-el", !isTxt);
+			if (name === "rating_badge" || name === "rating_value" || name === "achievement" || name === "level_badge" || name === "stat_total" || name === "stat_b15" || name === "stat_b35") {
+				node.classList.add(name.startsWith("stat_") ? "align-end" : "align-center");
+			}
+			// edit mode keeps faint boxes findable; live shows the true opacity
+			node.style.opacity = el.opacity == null ? "" : String(state.live ? el.opacity : Math.max(0.15, el.opacity));
 			Object.assign(node.style, {
 				left: effectiveX(name) + "px",
 				top: el.y + "px",
@@ -300,6 +428,18 @@
 			label.className = "el-label";
 			label.textContent = labels()[name];
 			node.appendChild(label);
+			if (isTxt) {
+				const wrapText = document.createElement("div");
+				wrapText.className = "el-text";
+				const run = document.createElement("span");
+				run.textContent = placeholder(name);
+				run.style.fontSize = Math.max(4, el.h * (TEXT_RATIO[name] || DEFAULT_TEXT_RATIO)) + "px";
+				run.style.color = el.color || "#ffffff";
+				const ow = el.outline_width == null ? 0 : el.outline_width;
+				run.style.webkitTextStroke = ow ? `${ow * (el.h / 40)}px ${el.outline_color || "#141414"}` : "0";
+				wrapText.appendChild(run);
+				node.appendChild(wrapText);
+			}
 			const mode = resizeMode(name);
 			const dirs = mode === "both" ? ["e", "s", "se"] : mode === "x" ? ["e"] : [];
 			for (const dir of dirs) {
@@ -330,7 +470,11 @@
 			text.className = "name";
 			text.textContent = labels()[name];
 			item.append(box, swatch, text);
+			const q = els.filter.value.trim().toLowerCase();
+			item.classList.toggle("d-none", !!q && !labels()[name].toLowerCase().includes(q));
 			item.addEventListener("click", (ev) => select(name, ev.shiftKey || ev.ctrlKey || ev.metaKey));
+			item.addEventListener("mouseenter", () => node.classList.add("hover"));
+			item.addEventListener("mouseleave", () => node.classList.remove("hover"));
 			els.list.appendChild(item);
 		});
 		renderSelection();
@@ -340,7 +484,7 @@
 		const name = state.selected;
 		const el = name && group()[name];
 		if (!el) {
-			els.selTitle.textContent = "No element selected";
+			els.selTitle.textContent = "Inspector";
 			els.selHint.classList.remove("d-none");
 			els.selFields.classList.add("d-none");
 			return;
@@ -382,8 +526,14 @@
 		// the bot ignores opacity on grids
 		els.fOpacity.disabled = [...state.sel].every((n) => n.startsWith("grid_"));
 		const text = [...state.sel].every(isText);
-		els.textStyle.classList.toggle("d-none", !text);
-		if (text) {
+		// always present, just disabled for non-text, so the panel never reflows
+		els.textStyle.disabled = !text;
+		els.textPreview.textContent = text ? placeholder(name) : "Aa 123";
+		if (!text) {
+			els.textPreview.style.color = "#8a90a8";
+			els.textPreview.style.webkitTextStroke = "0";
+			els.textPreview.style.opacity = "1";
+		} else {
 			els.fColor.value = el.color || "#ffffff";
 			els.fOutlineColor.value = el.outline_color || "#141414";
 			els.fOutlineWidth.value = el.outline_width == null ? 0 : el.outline_width;
@@ -442,8 +592,10 @@
 			select(name, true); // toggles; no drag
 			return;
 		}
-		if (!state.sel.has(name)) select(name);
-		else if (state.selected !== name) {
+		if (!state.sel.has(name)) {
+			select(name);
+			setTab("inspector");
+		} else if (state.selected !== name) {
 			state.selected = name;
 			renderSelection();
 		}
@@ -584,9 +736,33 @@
 		changed();
 	}
 
+	function cycleSelection(dir) {
+		const names = Object.keys(labels());
+		const i = names.indexOf(state.selected);
+		const next = names[(i + dir + names.length) % names.length];
+		select(next);
+		setTab("inspector");
+	}
+
 	function onKey(ev) {
 		const tag = (ev.target.tagName || "").toLowerCase();
 		if (tag === "input" || tag === "select" || tag === "textarea") return;
+		if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "z") {
+			ev.preventDefault();
+			stepHistory(ev.shiftKey ? 1 : -1);
+			return;
+		}
+		if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "y") {
+			ev.preventDefault();
+			stepHistory(1);
+			return;
+		}
+		if (!ev.ctrlKey && !ev.metaKey && !ev.altKey) {
+			if (ev.key === "l" || ev.key === "L") return setLive(!state.live);
+			if (ev.key === "?") return setTab("guide");
+			if (ev.key === "[") return cycleSelection(-1);
+			if (ev.key === "]") return cycleSelection(1);
+		}
 		if (ev.key === "Escape") {
 			select(null);
 			return;
@@ -609,8 +785,13 @@
 
 	// ---- import / export
 
+	let statusTimer = 0;
+
 	function setStatus(text) {
 		els.status.textContent = text;
+		els.status.classList.toggle("show", !!text);
+		clearTimeout(statusTimer);
+		if (text) statusTimer = setTimeout(() => els.status.classList.remove("show"), 5000);
 	}
 
 	function exportLayout() {
@@ -654,7 +835,9 @@
 			if (data.kind !== state.kind) switchKind(data.kind);
 			state.layouts[state.kind] = mergeLayout(state.kind, data);
 			state.selected = null;
-		state.sel.clear();
+			state.sel.clear();
+			const h = history[state.kind];
+			if (h) h.at = 0; // never merge an import into the previous edit's undo step
 			changed();
 			renderOptions();
 			renderColors();
@@ -663,22 +846,55 @@
 		reader.readAsText(file);
 	}
 
-	function loadImage(which, input) {
-		const file = input.files && input.files[0];
+	function loadImage(which, file) {
 		if (state.images[which]) URL.revokeObjectURL(state.images[which]);
 		state.images[which] = file ? URL.createObjectURL(file) : null;
+		const name = which === "base" ? els.baseName : els.topName;
+		const clear = which === "base" ? els.baseClear : els.topClear;
+		name.textContent = file ? file.name : "none";
+		name.title = file ? file.name : "";
+		clear.classList.toggle("d-none", !file);
 		if (file) {
 			const img = new Image();
 			img.onload = () => {
 				const [w, h] = spec().defaults.canvas;
 				const note = spec().fixedSize && Math.abs(img.width / img.height - w / h) > 0.02 * (w / h)
-					? ` Its aspect ratio doesn't match the ${w}×${h} canvas, so it will be stretched.`
+					? ` Its aspect ratio doesn't match the ${w}\u00D7${h} canvas, so it will be stretched.`
 					: "";
-				setStatus(`${which} image: ${img.width}×${img.height}.${note}`);
+				setStatus(`${which} image: ${img.width}\u00D7${img.height}.${note}`);
 			};
 			img.src = state.images[which];
 		}
 		renderImages();
+	}
+
+	// ---- tabs, mode, guide
+
+	function setTab(tab) {
+		state.tab = tab;
+		for (const btn of document.querySelectorAll(".sb-tabs [data-tab]")) {
+			const on = btn.dataset.tab === tab;
+			btn.classList.toggle("active", on);
+			btn.setAttribute("aria-selected", String(on));
+		}
+		for (const pane of document.querySelectorAll(".sb-pane")) pane.classList.toggle("d-none", pane.id !== "pane-" + tab);
+	}
+
+	function setLive(on) {
+		state.live = on;
+		els.modeEdit.classList.toggle("active", !on);
+		els.modeLive.classList.toggle("active", on);
+		els.modeEdit.setAttribute("aria-pressed", String(!on));
+		els.modeLive.setAttribute("aria-pressed", String(on));
+		els.liveNote.classList.toggle("d-none", !on);
+		els.labelsToggle.classList.toggle("d-none", on);
+		saveUi({ live: on });
+		renderStage();
+	}
+
+	function dismissWelcome() {
+		els.welcome.classList.add("d-none");
+		saveUi({ welcomed: true });
 	}
 
 	// ---- setup
@@ -806,6 +1022,7 @@
 		state.view = "page";
 		state.selected = null;
 		state.sel.clear();
+		resetHistory();
 		els.viewToggle.classList.toggle("d-none", !KINDS[kind].defaults.card);
 		for (const b of els.viewToggle.querySelectorAll("button")) b.classList.toggle("active", b.dataset.view === "page");
 		renderOptions();
@@ -836,8 +1053,43 @@
 				renderStage();
 			});
 		}
-		els.baseInput.addEventListener("change", () => loadImage("base", els.baseInput));
-		els.topInput.addEventListener("change", () => loadImage("top", els.topInput));
+		els.baseInput.addEventListener("change", () => loadImage("base", els.baseInput.files[0]));
+		els.topInput.addEventListener("change", () => loadImage("top", els.topInput.files[0]));
+		els.baseClear.addEventListener("click", () => {
+			els.baseInput.value = "";
+			loadImage("base", null);
+		});
+		els.topClear.addEventListener("click", () => {
+			els.topInput.value = "";
+			loadImage("top", null);
+		});
+		for (const btn of document.querySelectorAll(".sb-tabs [data-tab]")) btn.addEventListener("click", () => setTab(btn.dataset.tab));
+		els.modeEdit.addEventListener("click", () => setLive(false));
+		els.modeLive.addEventListener("click", () => setLive(true));
+		els.undoBtn.addEventListener("click", () => stepHistory(-1));
+		els.redoBtn.addEventListener("click", () => stepHistory(1));
+		els.guideBtn.addEventListener("click", () => setTab("guide"));
+		els.welcomeGuide.addEventListener("click", () => {
+			setTab("guide");
+			dismissWelcome();
+		});
+		els.welcomeDismiss.addEventListener("click", dismissWelcome);
+		els.filter.addEventListener("input", renderElements);
+		// drop a layout.json (import) or an image (base; Shift for top) on the canvas
+		els.scroll.addEventListener("dragover", (ev) => {
+			ev.preventDefault();
+			els.scroll.classList.add("drop");
+		});
+		els.scroll.addEventListener("dragleave", () => els.scroll.classList.remove("drop"));
+		els.scroll.addEventListener("drop", (ev) => {
+			ev.preventDefault();
+			els.scroll.classList.remove("drop");
+			const file = ev.dataTransfer.files[0];
+			if (!file) return;
+			if (file.type.startsWith("image/")) loadImage(ev.shiftKey ? "top" : "base", file);
+			else if (/\.json$/i.test(file.name)) importLayout(file);
+			else setStatus("Drop a PNG/JPEG/WebP image or a layout.json.");
+		});
 		for (const box of [els.showBase, els.showTop, els.showLabels]) box.addEventListener("change", renderStage);
 		els.selectAll.addEventListener("click", () => {
 			state.sel = new Set(Object.keys(labels()));
@@ -854,7 +1106,8 @@
 			if (!window.confirm(`Reset the ${spec().title} layout to the defaults?`)) return;
 			state.layouts[state.kind] = clone(spec().defaults);
 			state.selected = null;
-		state.sel.clear();
+			state.sel.clear();
+			if (history[state.kind]) history[state.kind].at = 0;
 			renderOptions();
 			renderColors();
 			changed();
@@ -876,7 +1129,10 @@
 		window.addEventListener("resize", () => {
 			if (state.zoom === "fit") renderStage();
 		});
+		const ui = loadUi();
+		if (!ui.welcomed) els.welcome.classList.remove("d-none");
 		switchKind(state.kind);
+		if (ui.live) setLive(true);
 	}
 
 	init();

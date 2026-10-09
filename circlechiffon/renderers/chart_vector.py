@@ -38,6 +38,47 @@ WHITE = (255, 255, 255)
 GREY = (128, 128, 128)
 
 
+# MajdataPlay's hold effect (Hold_Effect.prefab, used for touch holds too):
+# a particle system that, while the note is held, emits a thin ring
+# (CircleMiss.png) every 0.1s at the key or sensor. Each ring lives 0.3s and
+# never moves; it grows and fades along these curves (keys at age / 0.3,
+# interpolated linearly). Its quad is 2 (startSize x curve scalar) x 1.2
+# (transform) = 2.4 units across at full size. Prewarmed, so it starts with
+# three rings already alive, and it vanishes the moment the hold is let go.
+HOLD_FX_PERIOD = 0.1
+HOLD_FX_LIFE = 0.3
+HOLD_FX_DIAMETER = 2.4
+_HOLD_FX_SIZE = ((0.0, 0.2245), (0.4386, 0.8878), (0.9985, 1.0))
+_HOLD_FX_ALPHA = (
+    (0.0, 0.008), (0.0946, 0.541), (0.1429, 0.977), (0.502, 1.0),
+    (0.5965, 0.301), (0.666, 0.31), (1.0, 0.0),
+)
+# Where CircleMiss.png's ring sits, as a fraction of the quad's half-width.
+HOLD_FX_RING = 0.75
+
+
+def _lerp_keys(keys, x: float) -> float:
+    if x <= keys[0][0]:
+        return keys[0][1]
+    for (x0, y0), (x1, y1) in zip(keys, keys[1:]):
+        if x <= x1:
+            return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+    return keys[-1][1]
+
+
+def hold_effect_rings(since: float) -> list[tuple[float, float]]:
+    """(diameter in units, alpha) of each ring alive `since` seconds into
+    a hold, oldest first so the newest draws on top."""
+    rings = []
+    age = since % HOLD_FX_PERIOD
+    while age < HOLD_FX_LIFE:
+        f = age / HOLD_FX_LIFE
+        rings.append((HOLD_FX_DIAMETER * _lerp_keys(_HOLD_FX_SIZE, f), _lerp_keys(_HOLD_FX_ALPHA, f)))
+        age += HOLD_FX_PERIOD
+    rings.reverse()
+    return rings
+
+
 class VectorPainter:
     uses_guides = False
 
@@ -219,12 +260,13 @@ class VectorPainter:
         self._chevron_stroke(canvas, path(0.0), width, rgb, alpha)
 
     def slide_arrows(self, canvas, arrows, first_visible, alpha, kind, brightness=1.0):
-        for w in arrows[first_visible:]:
+        # End first, so the start of the slide sits on top where it crosses.
+        for w in reversed(arrows[first_visible:]):
             self._chevron(canvas, w, SLIDE[kind], alpha)
 
     def wifi_bars(self, canvas, wifi: g.WifiTrack, first_visible, alpha, kind, brightness=1.0):
         start = wifi.starts[1]
-        for i in range(first_visible, 11):
+        for i in range(10, first_visible - 1, -1):
             f = (i + 1) / 12
             pts = [self.xy(start + (e - start) * f) for e in wifi.ends]
             p = self.skia.Path()
@@ -389,6 +431,14 @@ class VectorPainter:
         x, y = self.xy(pos)
         r = self.R / 12.5 * 1.36 * (1.0 + 0.8 * f)
         canvas.drawCircle(x, y, r, self._stroke(WHITE, self.line * 1.5, 1.0 - f))
+
+    def hold_effect(self, canvas, pos, since, rgb=WHITE, strength=0.5):
+        """The game's hold effect as plain stroked rings; white and at half
+        strength in simple mode (mai-notes has none)."""
+        x, y = self.xy(pos)
+        for diameter, alpha in hold_effect_rings(since):
+            r = diameter / 2 * HOLD_FX_RING * self.k
+            canvas.drawCircle(x, y, r, self._stroke(rgb, self.line * 1.5, strength * alpha))
 
     def _touch_hit(self, canvas, pos, since):
         """A plain take on the game's touch hit: a soft disc opening out

@@ -1,6 +1,6 @@
 """
 /cc-template-preview's render: a template drawn over the real renderer
-with sample_data's fixed inputs - no DX NET account or request involved.
+with sample_data's randomised placeholder inputs - no DX NET account or request involved.
 """
 
 import asyncio
@@ -8,7 +8,6 @@ import io
 
 from PIL import Image
 
-from circlechiffon.adapters.dxrating.images import get_jackets_bulk
 from circlechiffon.adapters.maimai_net.badge_icons import get_all_badge_icons
 from circlechiffon.adapters.maimai_site.version_logo import get_version_logo
 from circlechiffon.customisation import sample_data
@@ -16,7 +15,6 @@ from circlechiffon.renderers.b50 import render_b50
 from circlechiffon.renderers.guides import render_guide
 from circlechiffon.renderers.layout import RenderTemplate
 from circlechiffon.renderers.profile import render_profile_core, render_profile_extras
-from circlechiffon.songdata.catalog import get_catalog
 
 
 def _overlay_guides(render: io.BytesIO, kind: str, layout: dict | None) -> io.BytesIO:
@@ -41,33 +39,26 @@ def _overlay_guides(render: io.BytesIO, kind: str, layout: dict | None) -> io.By
 async def render_preview(kind: str, template: RenderTemplate | None, *, icon_bytes: bytes | None = None, guides: bool = False) -> io.BytesIO:
     buf = io.BytesIO()
     if kind == "b50":
-        catalog = get_catalog()
-        result = sample_data.sample_best50(catalog)
-        image_names = {}
-        for entry in result.b15 + result.b35:
-            if entry is not None and (song := catalog.get_by_title(entry.score.title)) and song.image_name:
-                image_names[entry.score.title] = song.image_name
-        jackets, badge_icons, version_logo = await asyncio.gather(
-            get_jackets_bulk(list(image_names.values())), get_all_badge_icons(), get_version_logo()
-        )
-        b15_versions = [v for v in (catalog.current_version, catalog.previous_version) if v is not None]
+        result = sample_data.sample_best50()
+        badge_icons, version_logo = await asyncio.gather(get_all_badge_icons(), get_version_logo())
         await asyncio.to_thread(
             render_b50,
             player_name=sample_data.SAMPLE_NAME,
-            rating=sample_data.SAMPLE_RATING,
+            rating=result.total_rating,
             icon_bytes=icon_bytes,
             result=result,
-            b15_version_label=" and ".join(b15_versions) or "CURRENT VERSION",
-            jackets_by_title={t: jackets[n] for t, n in image_names.items() if n in jackets},
+            b15_version_label="CURRENT VERSION",
+            jackets_by_title=sample_data.sample_jackets(result),
             badge_icons=badge_icons,
             version_logo_bytes=version_logo,
             output=buf,
             template=template,
         )
     elif kind == "profile_core":
+        profile = sample_data.sample_profile()
         await asyncio.to_thread(
             render_profile_core,
-            profile=sample_data.sample_profile(),
+            profile=profile,
             icon_bytes=icon_bytes,
             course_rank_bytes=None,
             class_rank_bytes=None,

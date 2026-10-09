@@ -34,6 +34,7 @@ _EFFECT_SPRITES = (
     "Sprites/Game/EffectSprites/Star.png",
     "Sprites/Game/EffectSprites/StarWhite.png",
     "Sprites/Game/CircleMask.png",
+    "Sprites/Game/CircleMiss.png",
     "Sprites/Game/Firework_new.png",
     "Sprites/Game/EffectSprites/TouchEff.png",
     "Sprites/Game/EffectSprites/TouchEffparts_01.png",

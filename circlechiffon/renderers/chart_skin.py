@@ -22,6 +22,7 @@ from pathlib import Path
 
 import numpy as np
 
+from circlechiffon.renderers.chart_vector import hold_effect_rings
 from circlechiffon.simai import geometry as g
 
 DEFAULT_SKIN_DIR = Path(__file__).resolve().parent.parent.parent / "assets" / "chart_skin"
@@ -70,6 +71,9 @@ _TOUCH_SPARK_TINT = (255, 230, 119)
 # Firework rays cycle the note palette: each yellow, touch blue, tap magenta.
 _FIREWORK_COLORS = ((255, 215, 0), (0, 191, 255), (255, 64, 200))
 _FIREWORK_SECONDS = 0.6
+
+# HoldEffectDisplayer tints the ring by judgement; renders are all Perfect.
+_HOLD_FX_TINT = (255, 227, 0)
 
 
 def skin_dir() -> Path:
@@ -324,14 +328,15 @@ class SkinPainter:
 
     def slide_arrows(self, canvas, arrows, first_visible, alpha, kind, brightness=1.0):
         img = self.skin.get(f"slide{_variant(kind)}", "slide")
-        for w in arrows[first_visible:]:
+        # End first, so the start of the slide sits on top where it crosses.
+        for w in reversed(arrows[first_visible:]):
             self.static_sprite(canvas, img, w, alpha, brightness)
 
     def wifi_bars(self, canvas, wifi: g.WifiTrack, first_visible, alpha, kind, brightness=1.0):
         prefix = {"each": "wifi_each_", "break": "wifi_break_"}.get(kind, "wifi_")
-        for i, w in enumerate(wifi.bars):
-            if i >= first_visible:
-                self.static_sprite(canvas, self.skin.get(f"{prefix}{i}", f"wifi_{i}"), w, alpha, brightness)
+        for i in range(len(wifi.bars) - 1, first_visible - 1, -1):
+            w = wifi.bars[i]
+            self.static_sprite(canvas, self.skin.get(f"{prefix}{i}", f"wifi_{i}"), w, alpha, brightness)
 
     def slide_star(self, canvas, pos, rot, scale, kind, alpha, brightness=1.0):
         name = {"each": "star_each", "break": "star_break"}.get(kind, "star")
@@ -460,6 +465,21 @@ class SkinPainter:
             world = root @ g.mat_r(direction * orbit) @ g.mat_t(x, y) @ g.mat_r(-direction * orbit) @ g.mat_s(
                 small, small)
             self.sprite(canvas, img, world, alpha=alpha)
+
+    def hold_effect(self, canvas, pos, since):
+        """Hold_Effect.prefab: yellow rings pulsing out from the key or
+        sensor while a hold is held (curves in chart_vector)."""
+        img = self.skin.get("fx/CircleMiss")
+        if img is None:
+            # A skin imported before CircleMiss.png was: draw the rings.
+            if not hasattr(self, "_ring_fallback"):
+                from circlechiffon.renderers.chart_vector import VectorPainter
+                self._ring_fallback = VectorPainter(self.size, self.k * g.UNIT_RING)
+            self._ring_fallback.hold_effect(canvas, pos, since, _HOLD_FX_TINT, 1.0)
+            return
+        native = img.width() / self.k  # the sprite's width in units
+        for diameter, alpha in hold_effect_rings(since):
+            self.sprite(canvas, img, self.frame(pos, 0.0, diameter / native), alpha=alpha, tint=_HOLD_FX_TINT)
 
     def _touch_hit(self, canvas, pos, since):
         """touchPerfect.anim: a yellow glow ring opening out, inside a ring of
