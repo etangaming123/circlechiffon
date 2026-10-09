@@ -20,7 +20,7 @@ def columns(db_file, table):
 def test_create_all_makes_the_expected_tables(database, tmp_path):
     with sqlite3.connect(tmp_path / "test.db") as conn:
         tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    assert {"accounts", "banned_users", "template_whitelist"} <= tables
+    assert {"accounts", "banned_users", "template_whitelist", "leech_links"} <= tables
 
 
 def test_session_before_init_is_an_error():

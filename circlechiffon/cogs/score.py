@@ -4,7 +4,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from circlechiffon import access, accounts, badge_emojis, embed_colors
+from circlechiffon import access, accounts, badge_emojis, embed_colors, leech
 from circlechiffon.adapters.dxrating.images import jacket_url
 from circlechiffon.adapters.maimai_net.errors import MaimaiNetError, SessionExpired
 from circlechiffon.ratingcalc.calculator import rank_tag_for_achievement
@@ -195,7 +195,9 @@ async def build_score_view(
     out not to exist for this song). With `friend` given, the scores are
     that friend's rather than the invoker's - the invoker's own session is
     still what fetches them, so the account/session errors below are the
-    same either way. Returns None if the song has no standard-difficulty
+    same either way. With neither `friend` nor an account of the invoker's
+    own, an accepted leech link (leech.py) supplies the friend and the host's
+    session. Returns None if the song has no standard-difficulty
     charts at all. Propagates the usual account/session errors
     (NotLinked/SessionExpired/MaimaiNetError) for the caller to handle in
     whatever way fits its own command's UI."""
@@ -217,6 +219,15 @@ async def build_score_view(
     difficulties = available_difficulties(song, resolved_type)
     if not difficulties:
         return None
+
+    # Leech mode: a user with no account of their own is served their own
+    # friend entry through the host's session - same data as `friend=`.
+    session_id = None
+    if friend is None:
+        target = await leech.get_target(invoker_id)
+        if target is not None:
+            friend = await leech.fetch_entry(target)
+            session_id = target.host_id
 
     async def fetch(client):
         if friend is not None:
@@ -244,7 +255,10 @@ async def build_score_view(
             await accounts.set_display_name(invoker_id, name)
         return scores, play_stats, name
 
-    scores, play_stats, player_name = await accounts.with_client(invoker_id, fetch, on_retry=on_retry)
+    if session_id is not None:
+        scores, play_stats, player_name = await leech.with_host_client(session_id, fetch, on_retry=on_retry)
+    else:
+        scores, play_stats, player_name = await accounts.with_client(invoker_id, fetch, on_retry=on_retry)
 
     scored_difficulties = [d for d in difficulties if _matching_scores(scores, song.title, d, resolved_type)]
     if not scored_difficulties:
@@ -258,7 +272,7 @@ async def build_score_view(
         scored_difficulties,
         play_stats,
         player_name,
-        _FRIEND_DATA_NOTE if friend is not None else fallback_note,
+        leech.data_note() if session_id is not None else _FRIEND_DATA_NOTE if friend is not None else fallback_note,
     )
 
 
@@ -328,7 +342,7 @@ class ScoreCog(commands.Cog):
             await self._send_score_view(interaction, song, friend=resolved, chart_type=chart_type)
         except accounts.NotLinked:
             await interaction.edit_original_response(
-                content="You haven't linked a maimai DX NET account yet. Run `/cc-login` first."
+                content=await leech.not_linked_text(interaction.user.id)
             )
         except SessionExpired as e:
             await interaction.edit_original_response(content=str(e))

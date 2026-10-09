@@ -16,7 +16,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from circlechiffon import access, accounts
+from circlechiffon import access, accounts, leech
 from circlechiffon.adapters.maimai_net.client import MaimaiNetClient
 from circlechiffon.adapters.maimai_net.errors import MaimaiNetError, TotpRequired
 
@@ -190,11 +190,15 @@ class AuthCog(commands.Cog):
             return
         await interaction.response.defer(ephemeral=True)
         removed = await accounts.delete_account(interaction.user.id)
+        # leech links, whether hosted by this user or used by them
+        unlinked_leech = await leech.remove_for(interaction.user.id)
         if removed:
             await interaction.edit_original_response(
                 content="Unlinked your maimai DX NET account. Any stored session cookie and password (if you opted "
                 "into remembering it) have both been deleted."
             )
+        elif unlinked_leech:
+            await interaction.edit_original_response(content="Removed your leech link(s).")
         else:
             await interaction.edit_original_response(content="You don't have a linked maimai DX NET account.")
 

@@ -77,9 +77,12 @@ from circlechiffon.types import ChartType, Difficulty
 _RENDER_COOLDOWN = 30
 _RENDER_COOLDOWN_KEY = "cc-chart-render"
 _MAX_QUEUE = 5
-# Sent when `config.chart_render_server` is set but can't take the render,
-# just before this machine renders it instead.
-_REMOTE_DOWN_MESSAGE = "Main renderer is down - this render will take a long time."
+# Shown at the top of the progress message when `config.chart_render_server`
+# is set but can't take the render and this machine renders it instead.
+_REMOTE_DOWN_MESSAGE = "⚠️ Main renderer is down - this render will be slow."
+# Shortest gap between two progress edits; Discord allows about 5 webhook
+# edits per 5 seconds on one message.
+_MIN_EDIT_INTERVAL = 1.5
 
 
 class _RenderQueue:
@@ -457,16 +460,16 @@ class ChartCog(commands.Cog):
                 progress=progress.update,
                 render_mode=render_mode,
             )
-            await progress.stop()
-            plural = f" ({len(captures)} parts)" if len(captures) > 1 else ""
-            await interaction.edit_original_response(content=f"Encoding video{plural}...")
             outs = []
             for k, capture in enumerate(captures, start=1):
+                progress.phase("encoding", k - 1, len(captures))
                 out = tmp_dir / f"chart-{k}.mp4"
                 # Note times come straight from the chart, so no capture
                 # latency correction applies.
                 await encode_capture(capture, out, size_limit=limit, sfx_shift_ms=0, hit_sound=hit_sound)
                 outs.append(out)
+            # before the final edit, so a progress edit can't land after it
+            await progress.stop()
         finally:
             for capture in captures:
                 capture.video_path.unlink(missing_ok=True)
@@ -508,12 +511,15 @@ class ChartCog(commands.Cog):
                             size_budget_bytes=limit,
                             render_mode=render_mode,
                             progress=progress.update,
+                            on_phase=progress.phase,
                         )
                         await progress.stop()
                     except RemoteUnavailable as e:
                         print(f"Remote chart renderer unavailable, rendering locally: {e}")
-                        with contextlib.suppress(discord.HTTPException):
-                            await interaction.followup.send(_REMOTE_DOWN_MESSAGE)
+                        # in the progress message itself, and drop whatever
+                        # the remote render had got to - it's starting over
+                        progress.set_notice(_REMOTE_DOWN_MESSAGE)
+                        progress.reset()
                 if captures is None:
                     captures, videos = await self._render_here(
                         interaction, progress, tmp_dir, chart_text, hi_speed, from_measure, to_measure, limit,
@@ -594,23 +600,60 @@ def _progress_bar(fraction: float) -> str:
 
 
 class _ProgressReporter:
-    """Edits the interaction while the capture runs. The capture calls this
-    every couple of seconds; edits are throttled well under Discord's rate
-    limit and dropped silently if one fails - progress is cosmetic."""
+    """Keeps the interaction's message showing the render's latest state.
+
+    Callers only say what is true now (`update`, `phase`, `set_notice`,
+    `reset`); one worker task turns the newest state into an edit, at most
+    one per `_MIN_EDIT_INTERVAL`, and keeps going until nothing newer is
+    waiting. So a burst of changes never drops the last one - a phase change
+    arriving while an edit is in flight still gets shown. Failed edits are
+    ignored: progress is cosmetic."""
 
     def __init__(self, interaction: discord.Interaction, title: str, difficulty: Difficulty):
         self._interaction = interaction
         self._title = title
         self._difficulty = difficulty
+        self._notice: str | None = None
+        self._bar: tuple[float, float | None, float] | None = None
+        self._status: str | None = None
+        self._last_text: str | None = None
+        self._dirty = False
         self._task: asyncio.Task | None = None
         self._stopped = False
 
     def update(self, elapsed: float, total: float | None, fraction: float) -> None:
+        """The capture's progress bar; replaces any phase text."""
+        self._bar, self._status = (elapsed, total, fraction), None
+        self._kick()
+
+    def phase(self, phase: str, done: int = 0, total: int = 0) -> None:
+        """What the render is doing after the bar is done: "encoding"
+        (`done` of `total` parts muxed) or "downloading"."""
+        if phase == "encoding":
+            plural = f" ({min(done + 1, total)}/{total})" if total > 1 else ""
+            self._status = f"Encoding video{plural}..."
+        elif phase == "downloading":
+            self._status = "Downloading video..."
+        else:
+            return
+        self._kick()
+
+    def set_notice(self, text: str | None) -> None:
+        """A line kept above everything else until the final edit."""
+        self._notice = text
+        self._kick()
+
+    def reset(self) -> None:
+        """Forget the bar and phase text, e.g. when the render starts over."""
+        self._bar = self._status = None
+        self._kick()
+
+    def _kick(self) -> None:
         if self._stopped:
             return
-        if self._task is not None and not self._task.done():
-            return
-        self._task = asyncio.create_task(self._edit(elapsed, total, fraction))
+        self._dirty = True
+        if self._task is None or self._task.done():
+            self._task = asyncio.create_task(self._run())
 
     async def stop(self) -> None:
         """Must be awaited before the final edit. A progress edit still in
@@ -624,21 +667,38 @@ class _ProgressReporter:
             except (asyncio.CancelledError, Exception):
                 pass
 
-    async def _edit(self, elapsed: float, total: float | None, fraction: float) -> None:
-        if self._stopped:
-            return
+    def _text(self) -> str | None:
+        """The message to show, or None to leave it as it is."""
         header = f"Rendering **{self._title}** [{self._difficulty.display_name}]"
-        # Hold just short of full until the capture actually ends - the
-        # measure cursor reaches the last measure slightly before the chart
-        # finishes, and a completed bar on a running render reads as a hang.
-        clock = _format_clock(elapsed)
-        if total:
-            clock = f"{clock} / {_format_clock(total)}"
-        body = f"{_progress_bar(min(fraction, 0.99))} · {clock}"
-        try:
-            await self._interaction.edit_original_response(content=f"{header}\n{body}")
-        except discord.HTTPException:
-            pass
+        if self._status is not None:
+            body = self._status
+        elif self._bar is not None:
+            elapsed, total, fraction = self._bar
+            clock = _format_clock(elapsed)
+            if total:
+                clock = f"{clock} / {_format_clock(total)}"
+            # Hold just short of full until the capture actually ends - the
+            # measure cursor reaches the last measure slightly before the
+            # chart finishes, and a completed bar on a running render reads
+            # as a hang.
+            body = f"{_progress_bar(min(fraction, 0.99))} · {clock}"
+        elif self._notice is not None:
+            return f"{self._notice}\n{header}..."
+        else:
+            return None
+        return f"{self._notice}\n{header}\n{body}" if self._notice else f"{header}\n{body}"
+
+    async def _run(self) -> None:
+        while self._dirty and not self._stopped:
+            self._dirty = False
+            text = self._text()
+            if text is not None and text != self._last_text:
+                self._last_text = text
+                try:
+                    await self._interaction.edit_original_response(content=text)
+                except discord.HTTPException:
+                    pass
+            await asyncio.sleep(_MIN_EDIT_INTERVAL)
 
 
 async def setup(bot: commands.Bot):

@@ -6,7 +6,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from circlechiffon import access, accounts
+from circlechiffon import access, accounts, leech
 from circlechiffon.adapters.maimai_net.badge_icons import get_all_badge_icons
 from circlechiffon.adapters.maimai_net.errors import MaimaiNetError, SessionExpired
 from circlechiffon.adapters.maimai_net.parser import parse_profile, parse_profile_extras
@@ -34,6 +34,14 @@ class ProfileCog(commands.Cog):
         view_value = view.value if view is not None else "core"
         await interaction.response.defer()
         await interaction.edit_original_response(content="Getting data...")
+
+        target = await leech.get_target(interaction.user.id)
+        if target is not None:
+            if view_value == "extra":
+                await interaction.edit_original_response(content=leech.LEECH_UNSUPPORTED_MESSAGE)
+            else:
+                await leech.serve_via_friend_path(interaction, target, "_send_friend_profile")
+            return
 
         async def fetch(client):
             # both views come from the same page - fetch it once regardless
@@ -217,7 +225,7 @@ class ProfileCog(commands.Cog):
             )
         except accounts.NotLinked:
             await interaction.edit_original_response(
-                content="You haven't linked a maimai DX NET account yet. Run `/cc-login` first."
+                content=await leech.not_linked_text(interaction.user.id)
             )
         except SessionExpired as e:
             await interaction.edit_original_response(content=str(e))

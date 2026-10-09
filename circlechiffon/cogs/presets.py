@@ -6,7 +6,7 @@ from discord import app_commands
 from discord.ext import commands
 from sqlalchemy import delete, select
 
-from circlechiffon import access, accounts
+from circlechiffon import access, accounts, leech
 from circlechiffon.adapters.maimai_net import urls
 from circlechiffon.adapters.maimai_net.errors import ItemNotOwned, MaimaiNetError, SessionExpired
 from circlechiffon.database import engine as db_engine
@@ -129,7 +129,7 @@ class PresetsCog(commands.Cog):
             await interaction.edit_original_response(content=title + "\n" + "\n".join(lines))
         except accounts.NotLinked:
             await interaction.edit_original_response(
-                content="You haven't linked a maimai DX NET account yet. Run `/cc-login` first."
+                content=await leech.not_linked_text(interaction.user.id)
             )
         except SessionExpired as e:
             await interaction.edit_original_response(content=str(e))
@@ -199,7 +199,7 @@ class PresetsCog(commands.Cog):
             await interaction.edit_original_response(content=header + "\n" + "\n".join(lines))
         except accounts.NotLinked:
             await interaction.edit_original_response(
-                content="You haven't linked a maimai DX NET account yet. Run `/cc-login` first."
+                content=await leech.not_linked_text(interaction.user.id)
             )
         except SessionExpired as e:
             await interaction.edit_original_response(content=str(e))

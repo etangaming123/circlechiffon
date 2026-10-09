@@ -28,7 +28,10 @@ Commands marked 🔗 need a linked SEGA ID account. Everything else works with n
 ### Account
 
 * 🔗 `/cc-login` — Link your maimai DX NET account, via a private modal. Optional `remember_password` flag
-* `/cc-logout` — Unlink and delete everything stored about you
+* `/cc-logout` — Unlink and delete everything stored about you (including any leech links)
+* 🔗 `/cc-leech-send` — Let a Discord user who has no SEGA ID use the bot through your account: pick them from your maimai DX NET friend list (by name, or by the id from `/cc-friends show_ids:True`)
+* `/cc-leech-accept` — Accept a leech offer. `/cc-profile`, `/cc-best` and `/cc-scores` then show your own data, read through the host's account with the same limits as friend data (see [leech mode](./docs/limitations.md#leech-mode)). Needs no linked account
+* `/cc-leech-remove` — Remove a leech link or pending offer, whether you sent it or received it (omit `user` to remove all of yours)
 
 ### Profile & Records
 
@@ -140,7 +143,7 @@ On the bot's machine, add the server's address and the same secret to `config.js
 "chart_render_key": "<secret>"
 ```
 
-The key is encrypted in place the next time the bot starts. Give the render machine a fixed LAN address (a DHCP reservation on your router) so the URL keeps working. If the server is off or unreachable, `/cc-chart` says so and renders on the bot's machine as before. Leave `chart_render_server` empty to always render locally.
+The key is encrypted in place the next time the bot starts. Give the render machine a fixed LAN address (a DHCP reservation on your router) so the URL keeps working. If the server is off or unreachable, `/cc-chart` says so in its progress message and renders on the bot's machine as before. Update `render_server.py` on the render machine too after pulling: newer versions report which part is being encoded, so the bot's message can say "Encoding video (2/3)..." instead of sitting on the last percentage. Leave `chart_render_server` empty to always render locally.
 
 ffmpeg and `skia-python` are checked at runtime. Without them `/cc-chart` still answers, it just replies with the chart's stats instead of a video; every other command is unaffected.
 

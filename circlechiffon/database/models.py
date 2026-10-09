@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, DateTime, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -92,3 +92,26 @@ class TemplateWhitelist(Base):
 
     discord_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class LeechLink(Base):
+    """A "leech" offer from a linked Discord user (the host) to another
+    Discord user (the leecher): the leecher may use the bot without a SEGA ID
+    of their own, reading their own data through the host's session via the
+    friend pages (see leech.py).
+
+    `friend_idx` is the leecher's id on the host's DX NET friend list - the
+    hidden `idx` every friend sub-page is keyed on, not a user-facing friend
+    code. `friend_name` is kept so a drifted idx can be re-resolved by name.
+    `accepted` stays False until the leecher runs /cc-leech-accept.
+    """
+
+    __tablename__ = "leech_links"
+
+    host_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    leecher_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    friend_idx: Mapped[str] = mapped_column(String(64), nullable=False)
+    friend_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    accepted: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

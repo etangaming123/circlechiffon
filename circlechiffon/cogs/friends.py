@@ -10,7 +10,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from circlechiffon import access, accounts, badge_emojis, embed_colors
+from circlechiffon import access, accounts, badge_emojis, embed_colors, leech
 from circlechiffon.adapters.dxrating.images import get_jackets_bulk, jacket_url
 from circlechiffon.adapters.maimai_net.badge_icons import get_all_badge_icons
 from circlechiffon.adapters.maimai_site.version_logo import get_version_logo
@@ -50,6 +50,15 @@ def _normalize_name(text: str) -> str:
     raw text misses almost everything - this makes "ethan" match "Ｅｔｈａｎ"
     or "ｲｰｻﾝ"-style halfwidth katakana the same as their generic spelling."""
     return unicodedata.normalize("NFKC", text).casefold().strip()
+
+
+def _run_with_session(interaction: discord.Interaction, session_id: int | None):
+    """Returns `run(operation)`: the invoker's own session, or - for leech
+    mode, where `session_id` is the host's Discord id - the host's."""
+    retry = accounts.default_retry_notice(interaction)
+    if session_id is None:
+        return lambda operation: accounts.with_client(interaction.user.id, operation, on_retry=retry)
+    return lambda operation: leech.with_host_client(session_id, operation, on_retry=retry)
 
 
 async def _resolve_friend_entry(client, query: str) -> FriendEntry | list[FriendEntry] | None:
@@ -532,7 +541,7 @@ class FriendsCog(commands.Cog):
             view.message = message
         except accounts.NotLinked:
             await interaction.edit_original_response(
-                content="You haven't linked a maimai DX NET account yet. Run `/cc-login` first."
+                content=await leech.not_linked_text(interaction.user.id)
             )
         except SessionExpired as e:
             await interaction.edit_original_response(content=str(e))
@@ -576,7 +585,7 @@ class FriendsCog(commands.Cog):
             await self._send_friend_profile(interaction, resolved)
         except accounts.NotLinked:
             await interaction.edit_original_response(
-                content="You haven't linked a maimai DX NET account yet. Run `/cc-login` first."
+                content=await leech.not_linked_text(interaction.user.id)
             )
         except SessionExpired as e:
             await interaction.edit_original_response(content=str(e))
@@ -587,13 +596,21 @@ class FriendsCog(commands.Cog):
                 content=f"Couldn't fetch that friend's profile: unexpected error ({type(e).__name__}: {e})"
             )
 
-    async def _send_friend_profile(self, interaction: discord.Interaction, entry: FriendEntry):
+    async def _send_friend_profile(
+        self,
+        interaction: discord.Interaction,
+        entry: FriendEntry,
+        *,
+        session_id: int | None = None,
+        note: str | None = None,
+    ):
         """Fetches the friend's card images and edits `interaction`'s
         response with the rendered profile card. Works from either the
         original slash-command interaction (already deferred) or a
         FriendPickView select callback (already responded to via
         edit_message) - both support edit_original_response against the
-        same underlying message."""
+        same underlying message. `session_id`/`note` are for leech mode: fetch
+        through the host's session, and replace the generic limits line."""
         profile = entry.profile
 
         async def fetch(client):
@@ -609,9 +626,9 @@ class FriendsCog(commands.Cog):
             )
 
         try:
-            icon_bytes, course_rank_bytes, class_rank_bytes, rating_badge_bytes, badge_icons = await accounts.with_client(
-                interaction.user.id, fetch, on_retry=accounts.default_retry_notice(interaction)
-            )
+            icon_bytes, course_rank_bytes, class_rank_bytes, rating_badge_bytes, badge_icons = await _run_with_session(
+                interaction, session_id
+            )(fetch)
 
             buf = io.BytesIO()
             await asyncio.to_thread(
@@ -626,14 +643,14 @@ class FriendsCog(commands.Cog):
                 output=buf,
             )
             await interaction.edit_original_response(
-                content="-# Visible friend data is limited.",
+                content=f"-# {note or 'Visible friend data is limited.'}",
                 embed=None,
                 view=None,
                 attachments=[discord.File(buf, filename=f"friend-profile-{entry.idx}.png")],
             )
         except accounts.NotLinked:
             await interaction.edit_original_response(
-                content="You haven't linked a maimai DX NET account yet. Run `/cc-login` first.", view=None
+                content=await leech.not_linked_text(interaction.user.id), view=None
             )
         except SessionExpired as e:
             await interaction.edit_original_response(content=str(e), view=None)
@@ -677,7 +694,7 @@ class FriendsCog(commands.Cog):
             await self._render_friend_best(interaction, resolved)
         except accounts.NotLinked:
             await interaction.edit_original_response(
-                content="You haven't linked a maimai DX NET account yet. Run `/cc-login` first."
+                content=await leech.not_linked_text(interaction.user.id)
             )
         except SessionExpired as e:
             await interaction.edit_original_response(content=str(e))
@@ -688,11 +705,20 @@ class FriendsCog(commands.Cog):
                 content=f"Couldn't render that friend's best-50: unexpected error ({type(e).__name__}: {e})"
             )
 
-    async def _render_friend_best(self, interaction: discord.Interaction, entry: FriendEntry):
+    async def _render_friend_best(
+        self,
+        interaction: discord.Interaction,
+        entry: FriendEntry,
+        *,
+        session_id: int | None = None,
+        note: str | None = None,
+    ):
         """Fetches scores + renders the best-50 image, editing `interaction`'s
         response throughout. Works from either the original slash-command
         interaction (already deferred) or a FriendPickView select callback
-        (already responded to via edit_message)."""
+        (already responded to via edit_message). `session_id`/`note` are for
+        leech mode: fetch through the host's session, and append `note` to the
+        caption."""
         start_time = time.monotonic()
 
         async def fetch(client):
@@ -717,9 +743,7 @@ class FriendsCog(commands.Cog):
             return scores, icon_bytes, rating_badge_bytes
 
         try:
-            scores, icon_bytes, rating_badge_bytes = await accounts.with_client(
-                interaction.user.id, fetch, on_retry=accounts.default_retry_notice(interaction)
-            )
+            scores, icon_bytes, rating_badge_bytes = await _run_with_session(interaction, session_id)(fetch)
 
             if not scores:
                 await interaction.edit_original_response(content=_NO_SCORES_HINT, view=None)
@@ -780,13 +804,14 @@ class FriendsCog(commands.Cog):
                     f"Computed rating: **{result.total_rating}** "
                     f"(New Charts: **{result.b15_total}**, Old Charts: **{result.b35_total}**)\n"
                     f"-# Rendered in `{elapsed:.2f}s`"
+                    + (f"\n-# {note}" if note else "")
                 ),
                 attachments=[discord.File(buf, filename=f"friend-best50-{entry.profile.display_name}-{timestamp}.png")],
                 view=None,
             )
         except accounts.NotLinked:
             await interaction.edit_original_response(
-                content="You haven't linked a maimai DX NET account yet. Run `/cc-login` first.", view=None
+                content=await leech.not_linked_text(interaction.user.id), view=None
             )
         except SessionExpired as e:
             await interaction.edit_original_response(content=str(e), view=None)
@@ -909,7 +934,7 @@ class FriendsCog(commands.Cog):
             view.message = message
         except accounts.NotLinked:
             await interaction.edit_original_response(
-                content="You haven't linked a maimai DX NET account yet. Run `/cc-login` first."
+                content=await leech.not_linked_text(interaction.user.id)
             )
         except SessionExpired as e:
             await interaction.edit_original_response(content=str(e))

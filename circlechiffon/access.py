@@ -11,7 +11,7 @@ from sqlalchemy import delete
 
 from config import config
 from circlechiffon.database import engine as db_engine
-from circlechiffon.database.models import BannedUser
+from circlechiffon.database.models import BannedUser, LeechLink
 
 MAIMAI_NET_COOLDOWN = 15  # commands that talk to maimai DX NET
 # Fan-out commands that issue one request per friend rather than a fixed
@@ -102,7 +102,9 @@ async def get_ban(discord_id: int) -> BannedUser | None:
 async def ban_user(discord_id: int, *, duration_seconds: int | None = None, ncmd: bool = False, reason: str | None = None) -> None:
     """Bans a user. `ncmd=True` lifts the ban after their next command
     attempt; otherwise `duration_seconds=None` is a permanent ban and a given
-    value expires that many seconds from now."""
+    value expires that many seconds from now. A banned user's leech links
+    (as host) are deleted too, so a ban can't be sidestepped by their
+    leechers carrying on through the host's session."""
     expires_at = None
     if not ncmd and duration_seconds is not None:
         expires_at = _utcnow() + timedelta(seconds=duration_seconds)
@@ -115,6 +117,7 @@ async def ban_user(discord_id: int, *, duration_seconds: int | None = None, ncmd
         ban.expires_at = expires_at
         ban.ncmd = ncmd
         ban.reason = reason
+        await session.execute(delete(LeechLink).where(LeechLink.host_id == discord_id))
         await session.commit()
 
 

@@ -7,7 +7,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from circlechiffon import access, accounts, badge_emojis, embed_colors
+from circlechiffon import access, accounts, badge_emojis, embed_colors, leech
 from circlechiffon.adapters.dxrating.images import get_jackets_bulk
 from circlechiffon.adapters.maimai_net.badge_icons import get_all_badge_icons
 from circlechiffon.adapters.maimai_site.version_logo import get_version_logo
@@ -445,7 +445,7 @@ class RecordsCog(commands.Cog):
             view.message = message
         except accounts.NotLinked:
             await interaction.edit_original_response(
-                content="You haven't linked a maimai DX NET account yet. Run `/cc-login` first."
+                content=await leech.not_linked_text(interaction.user.id)
             )
         except SessionExpired as e:
             await interaction.edit_original_response(content=str(e))
@@ -471,6 +471,14 @@ class RecordsCog(commands.Cog):
         start_time = time.monotonic()
         await interaction.response.defer()
         await interaction.edit_original_response(content="Preparing...")
+
+        target = await leech.get_target(interaction.user.id)
+        if target is not None:
+            await leech.serve_via_friend_path(
+                interaction, target, "_render_friend_best",
+                extra_note=" `next_update` isn't available in leech mode." if next_update else "",
+            )
+            return
 
         async def fetch(client):
             display_order = ["Re:MASTER", "MASTER", "EXPERT", "ADVANCED", "BASIC"]

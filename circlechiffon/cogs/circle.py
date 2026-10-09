@@ -5,7 +5,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from circlechiffon import access, accounts, embed_colors
+from circlechiffon import access, accounts, embed_colors, leech
 from circlechiffon.adapters.maimai_net.errors import MaimaiNetError, SessionExpired
 from circlechiffon.renderers.gauge import render_achievement_gauge
 from circlechiffon.types import Circle, CircleChallenge, CircleMember
@@ -158,7 +158,7 @@ class CircleCog(commands.Cog):
             view.message = message
         except accounts.NotLinked:
             await interaction.edit_original_response(
-                content="You haven't linked a maimai DX NET account yet. Run `/cc-login` first."
+                content=await leech.not_linked_text(interaction.user.id)
             )
         except SessionExpired as e:
             await interaction.edit_original_response(content=str(e))
@@ -213,7 +213,7 @@ class CircleCog(commands.Cog):
             await interaction.edit_original_response(content=None, embed=embed, attachments=files)
         except accounts.NotLinked:
             await interaction.edit_original_response(
-                content="You haven't linked a maimai DX NET account yet. Run `/cc-login` first."
+                content=await leech.not_linked_text(interaction.user.id)
             )
         except SessionExpired as e:
             await interaction.edit_original_response(content=str(e))

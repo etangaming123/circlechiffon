@@ -16,6 +16,7 @@ the same chart would fail here too.
 import asyncio
 import time
 from pathlib import Path
+from typing import Callable
 
 import httpx
 
@@ -36,6 +37,12 @@ _FAILURES = {
     "VideoEncodeError": VideoEncodeError,
     "FfmpegUnavailable": FfmpegUnavailable,
 }
+
+
+# on_phase(phase, done, total): "encoding" (parts muxed so far / parts) and
+# "downloading" (0 / parts) - the stretches after rendering, which `progress`
+# says nothing about. `done`/`total` are 0 from a server that predates them.
+PhaseCallback = Callable[[str, int, int], None]
 
 
 class RemoteUnavailable(RuntimeError):
@@ -69,6 +76,7 @@ async def render_remote(
     size_budget_bytes: int | None,
     render_mode: str,
     progress: ProgressCallback | None = None,
+    on_phase: PhaseCallback | None = None,
 ) -> tuple[list[CaptureResult], list[bytes]]:
     timeout = httpx.Timeout(_READ_TIMEOUT, connect=_CONNECT_TIMEOUT)
     async with httpx.AsyncClient(base_url=url, headers={"X-Render-Key": key}, timeout=timeout) as client:
@@ -91,7 +99,7 @@ async def render_remote(
             raise RemoteUnavailable(f"{url} sent an unexpected reply") from e
 
         try:
-            return await _follow(client, url, job_id, progress)
+            return await _follow(client, url, job_id, progress, on_phase)
         finally:
             # Done, failed or cancelled (the command was abandoned): either
             # way the server can drop the job and stop rendering it.
@@ -102,8 +110,10 @@ async def render_remote(
 
 
 async def _follow(client: httpx.AsyncClient, url: str, job_id: str,
-                  progress: ProgressCallback | None) -> tuple[list[CaptureResult], list[bytes]]:
+                  progress: ProgressCallback | None,
+                  on_phase: PhaseCallback | None = None) -> tuple[list[CaptureResult], list[bytes]]:
     deadline = time.monotonic() + _JOB_TIMEOUT
+    last_phase = None
     while True:
         if time.monotonic() > deadline:
             raise RemoteUnavailable(f"{url} took longer than {_JOB_TIMEOUT // 60} minutes")
@@ -124,9 +134,19 @@ async def _follow(client: httpx.AsyncClient, url: str, job_id: str,
             raise failure(error)
         if state == "rendering" and progress is not None:
             progress(float(status.get("elapsed") or 0.0), status.get("total"), float(status.get("fraction") or 0.0))
+        elif state == "encoding" and on_phase is not None:
+            # rendering ends in a burst (the last wave of chunks finishes
+            # together), so a poll rarely sees it at 100% - without this the
+            # message would sit on a stale percentage through the whole mux
+            phase = ("encoding", int(status.get("encoded") or 0), int(status.get("part_count") or 0))
+            if phase != last_phase:
+                last_phase = phase
+                on_phase(*phase)
         await asyncio.sleep(_POLL_SECONDS)
 
     parts = status.get("parts") or []
+    if on_phase is not None:
+        on_phase("downloading", 0, len(parts))
     videos = []
     for k in range(len(parts)):
         try:

@@ -35,6 +35,29 @@ These are **not bugs** — SEGA simply doesn't expose the data:
 * Favorite status has **no bearing** on score access. An empty result means the friend genuinely
   hasn't played that difficulty.
 
+## Leech mode
+
+`/cc-leech-send` / `/cc-leech-accept` let someone with no SEGA ID use the bot by reading **their own friend
+entry** through a host's linked session. It is the friend-data path above, so every limit there applies:
+achievement and combo/sync only, no DX score, no play counts or last-played, rating computed locally.
+
+* Works: `/cc-profile` (core view), `/cc-best`, `/cc-scores` and `/cc-info`'s "Check my score" button.
+* Doesn't (SEGA exposes nothing for a friend): `/cc-recent`, `/cc-album`, `/cc-circle*`, `/cc-display`,
+  `/cc-preset-*`, `/cc-profile view:Extra`, `/cc-best next_update:True`. Not offered, to avoid exposing the host's
+  friend list or costing the host's session a fan-out: `/cc-friends`, `/cc-friend-*`, `/cc-leaderboard`, and
+  `/cc-scores friend:`.
+* The leecher has to already be on the host's maimai DX NET friend list. There is no friend-code search or
+  invite flow; the bot only stores the friend's id from the host's list.
+* A leecher never sees the host's friend list: only the one stored friend id is ever fetched.
+* Their reads use the host's session, so they share the host's one-live-session-per-account and the
+  bot-wide request limiter. If the host unlinks, the link is deleted; if the host's session can't be renewed
+  or they remove the friend, the leecher is told to ask the host.
+* A user with an account of their own is never leeched.
+* Offers expire after 7 days, and expired offers are purged hourly. Either side can end a link or offer with
+  `/cc-leech-remove`; `/cc-logout` removes links in either role. Banning a host also deletes the links they host.
+* Unverified live: whether a friend's id stays the same over time. If it changes, the stored name is used to find
+  them again.
+
 ## `/cc-leaderboard` is the heaviest command
 
 It costs one request per friend, plus two for your own profile and score list — on an account with

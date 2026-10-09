@@ -79,6 +79,7 @@ class _Job:
     fraction: float = 0.0
     error: str | None = None
     error_type: str | None = None
+    part_count: int = 0
     parts: list[dict] = field(default_factory=list)
     files: list[Path] = field(default_factory=list)
     finished: float | None = None
@@ -89,6 +90,9 @@ class _Job:
         if self.error is not None:
             out["error"] = self.error
             out["error_type"] = self.error_type
+        if self.state in ("encoding", "done"):
+            out["encoded"] = len(self.parts)
+            out["part_count"] = self.part_count
         if self.state == "done":
             out["parts"] = self.parts
         return out
@@ -191,6 +195,7 @@ class _Renderer:
                     render_mode=mode,
                 )
                 rendered = time.perf_counter() - started
+                job.part_count = len(captures)
                 job.state = "encoding"
                 hit_sound = chart_skin.game_hit_sound() if mode in (MODE_GAME, MODE_MISS) else None
                 limit = p["size_budget_bytes"] or None

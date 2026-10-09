@@ -32,10 +32,17 @@ This is **less secure** than the default: a stored password is far more valuable
 a session token, which can simply be invalidated. Only opt in if you're comfortable with that
 tradeoff.
 
+## Leech mode
+
+If you run `/cc-leech-send`, the person you name can have the bot read **their own** friend entry through
+*your* linked session (see [leech mode](./limitations.md#leech-mode)). Nothing of yours is shown to them -
+no password, cookie or friend list - but their requests do use your session, so they count toward its single
+live session and can contribute to DX NET evicting it. Unlinking with `/cc-logout` ends every link you host.
+
 ## Deleting your data
 
-`/cc-logout` deletes everything stored — the session token and, if you opted in, your credentials —
-at once.
+`/cc-logout` deletes everything stored — the session token and, if you opted in, your credentials, plus any
+leech links you host or use — at once.
 
 ## For selfhosters
 

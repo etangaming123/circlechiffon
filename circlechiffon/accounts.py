@@ -14,7 +14,7 @@ import crypto_utils
 from circlechiffon.adapters.maimai_net.client import MaimaiNetClient
 from circlechiffon.adapters.maimai_net.errors import MaimaiNetError, SessionExpired
 from circlechiffon.database import engine as db_engine
-from circlechiffon.database.models import Account, CollectionPreset
+from circlechiffon.database.models import Account, CollectionPreset, LeechLink
 
 
 _FAILED = object()  # sentinel: `operation` may legitimately return None
@@ -209,6 +209,8 @@ async def delete_account(discord_id: int) -> bool:
     async with db_engine.session() as session:
         result = await session.execute(delete(Account).where(Account.discord_id == discord_id))
         await session.execute(delete(CollectionPreset).where(CollectionPreset.discord_id == discord_id))
+        # links hosted by this account have nothing left to read through
+        await session.execute(delete(LeechLink).where(LeechLink.host_id == discord_id))
         await session.commit()
         return result.rowcount > 0
 

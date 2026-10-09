@@ -1,6 +1,6 @@
 # CiRCLE Chiffon Privacy Policy
 
-**Effective Date**: 2026-08-23
+**Effective Date**: 2026-10-10
 **Bot Name**: CiRCLE Chiffon#4436
 **Developer**: etangaming123
 **Contact**:
@@ -21,6 +21,7 @@ This policy only describes what CiRCLE Chiffon itself collects, not what Discord
 - **Discord User ID**: Used as the key that links your Discord account to any maimai DX NET account you choose to link.
 - **Command Cooldowns**: Your Discord User ID and the name of the command you last ran are held in memory (never written to disk) to enforce a short per-command cooldown, and are cleared automatically once the cooldown expires or the Bot restarts.
 - **Ban Records**: If the developer bans your Discord User ID from using the Bot, a record is kept containing only your Discord User ID, the ban's expiry (if any) and reason (if any), and when it was issued - no username, message content, or server information is stored alongside it. This record is deleted automatically once the ban expires or is manually lifted.
+- **Leech Records**: When someone runs `/cc-leech-send`, a record is kept containing the Discord User ID of the user who sent the leech offer (the "host"), the Discord User ID of the user it was sent to (the "leecher"), the display name of the maimai DX NET friend the host chose, that friend's internal ID from the host's friend list (not their SEGA friend code), whether the offer has been accepted, and when it was sent and accepted. These records are stored unencrypted, and contain no credentials or session data.
 
 ### 2.2. Information Provided When Linking Your Account
 
@@ -30,7 +31,15 @@ None of this is collected unless you run `/cc-login`:
 - **`remember_password` (opt-in only)**: if you explicitly enable this option and confirm the warning shown to you, your SEGA ID username **and** password are additionally stored, encrypted at rest, so the Bot can silently re-authenticate you when your session cookie expires.
 - **Profile/play data**: your maimai DX NET display name, rating, title, and recent play/score data are fetched live from maimai DX NET when you run commands like `/cc-profile`, `/cc-recent`, and `/cc-best`; this data is used to build the response shown to you and is not separately retained beyond what's needed to render that response.
 
-All of the above can be deleted at any time by running `/cc-logout`, which removes your session cookie and, if you opted in, your stored username/password, in one step.
+All of the above can be deleted at any time by running `/cc-logout`, which removes your session cookie, your stored username/password (if you opted in) and any leech records you are part of, in one step.
+
+### 2.3. Leech Mode
+
+Leech mode lets a user without a linked account use some commands through another user's linked account. In terms of information:
+
+- **What is stored**: the leech record described in 2.1, and nothing else about the leecher. If you only use leech mode, you never enter SEGA ID credentials and none are stored for you.
+- **Profile/play data**: when a leecher runs a supported command, their own maimai DX NET display name, rating, title and score data are fetched live, as their friend entry on the host's friend list. This is used to build the response shown to them and is not separately retained beyond what's needed to render that response.
+- **The host's session**: these requests are made with the host's stored session. The host's credentials and session are never shown or given to the leecher, and the leecher never sees the host's friend list. Only the one friend entry named in the leech record is requested.
 
 **We do not collect any other personally identifiable information, such as your real name or physical address, unless you separately choose to provide it to us directly (e.g. by messaging the developer).**
 
@@ -38,6 +47,7 @@ All of the above can be deleted at any time by running `/cc-logout`, which remov
 
 - **Service Provision**: to authenticate you against maimai DX NET and display your linked profile, recent plays, and Best-50 rating.
 - **Session Maintenance**: to automatically refresh your session (only if you opted into `remember_password`) so you don't need to re-run `/cc-login` every time your session expires.
+- **Leech Mode**: to let a user who has not linked an account use some commands through another user's linked account, with limited data, once both users have agreed (see 2.3).
 - **Error Diagnosis**: to identify and fix bugs using console error output.
 - **Abuse Prevention**: to enforce per-command cooldowns and, where necessary, to ban a Discord User ID from using the Bot.
 
@@ -47,6 +57,7 @@ All of the above can be deleted at any time by running `/cc-logout`, which remov
 
 Your linked-account data (session cookie, and username/password if you opted into `remember_password`) is stored in a local SQLite database (`circlechiffon.db`) on the machine running the Bot. These values are encrypted at rest using Fernet symmetric encryption. The encryption key is either supplied via an environment variable (`CIRCLECHIFFON_ENCRYPTION_KEY`) set by whoever runs the Bot, or, if that variable isn't set, auto-generated into a local key file (`.circlechiffon.key`) alongside the database on first run.
 Ban records (Discord User ID, expiry, reason) are stored unencrypted in the same local SQLite database, since they contain no credentials or session data - just enough to enforce the ban. Cooldown state is kept in memory only and is never written to disk.
+Leech records (see 2.1) are stored unencrypted in the same local SQLite database, since they contain no credentials or session data.
 The machine running the officially hosted instance of CiRCLE Chiffon is not shared with any third party, and only the developer has access to it.
 
 ## 5. How We Share Your Information
@@ -55,18 +66,20 @@ The machine running the officially hosted instance of CiRCLE Chiffon is not shar
 
 - **The login itself**: your SEGA ID username, password, and TOTP code (if provided) are sent directly to SEGA's own Aime authentication gateway, as part of performing the login you requested. They are not sent anywhere else.
 - **dxrating.net lookups**: song lookups (`/cc-info`), the per-track detail shown in `/cc-recent`, and the jacket art used in `/cc-best` are enriched using dxrating.net's public tags API and image CDN. These are plain song/chart lookups; no information that identifies you is sent to dxrating.net as part of this.
+- **Command output in Discord**: most commands reply in the channel where you ran them, so everyone who can see that channel can see the result (e.g. `/cc-best`, `/cc-profile`). This includes friend display names, and the display name in a leech offer, which also pings the user it is sent to. This is how Discord bot replies normally work, not a transfer to another third party. Commands that handle credentials (`/cc-login`, `/cc-logout`) reply privately.
 - **Legal Compliance**: if required to do so by law or in response to a valid request from a public authority.
 
 ## 6. Data Retention
 
 Linked-account data (session cookie, and username/password if opted in) is retained until you run `/cc-logout`, or until you unlink and relink with different credentials. Error logs are transient console output and are not persisted beyond normal log retention on the host machine. Cooldown state exists only in memory and is gone the moment it expires or the Bot restarts. A ban record is retained only for as long as the ban itself is active - it's deleted automatically the moment a timed ban expires or a ban is manually lifted, and we intentionally keep it minimal (see 2.1) rather than as a permanent moderation history.
+Leech records are retained until either user in the record removes them with `/cc-leech-remove` or `/cc-logout`, the host unlinks their account, or the host is banned from using the Bot (each of which deletes every record the host has). An offer that is not accepted can no longer be accepted after 7 days, and is then deleted automatically within about an hour.
 
 ## 7. Your Rights and Choices
 
 At any point, you may:
 
 - **Access or Update Your Information**: re-run `/cc-login` to replace what's stored for your account.
-- **Delete Your Information**: run `/cc-logout` to remove everything the Bot has stored about your linked account.
+- **Delete Your Information**: run `/cc-logout` to remove everything the Bot has stored about your linked account, and any leech records you are part of, whether you sent or received them. If you only want to remove a leech record or offer, run `/cc-leech-remove` instead. Both work without a linked account.
 
 For anything not covered by those commands, contact us using the information at the top of this page and we will respond to verifiable requests.
 
@@ -77,6 +90,7 @@ The Bot is not intended for use by children under the age of digital consent in 
 ## 9. Third-Party Services
 
 The Bot relies on maimai DX NET/SEGA (for account linking) and dxrating.net (for chart tags and jacket art). We are not responsible for the privacy practices of these third parties, and recommend reviewing their own privacy policies separately.
+If you use leech mode, requests to maimai DX NET/SEGA are made with the host's linked account, so they appear to SEGA as activity on the host's account, not yours.
 
 ## 10. Changes to This Privacy Policy
 
