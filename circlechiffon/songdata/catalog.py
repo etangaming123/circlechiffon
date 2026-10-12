@@ -22,6 +22,15 @@ DATA_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "dxdata.jso
 MIN_INTL_SHEETS = 20
 
 
+def pick_current_index(version_names: list[str], intl_counts: dict[str, int], minimum: int) -> int:
+    """Index in `version_names` (chronological) of the current INTL version: the
+    latest with `minimum`+ INTL-flagged charts. Shared with update_dxdata.py so the
+    constants it picks and the B15 window here always agree on the version. Falls
+    back to the newest listed version if none qualifies."""
+    released = [i for i, name in enumerate(version_names) if intl_counts.get(name, 0) >= minimum]
+    return released[-1] if released else len(version_names) - 1
+
+
 def _parse_note_counts(raw: dict | None) -> NoteCounts | None:
     if not raw:
         return None
@@ -110,8 +119,7 @@ class SongCatalog:
         # (B15: current version + one version prior) vs "old" (B35).
         version_names = [v["version"] for v in raw.get("versions") or []]
         intl_counts = Counter(sh.version for song in self.songs for sh in song.sheets if sh.intl)
-        released = [i for i, name in enumerate(version_names) if intl_counts[name] >= MIN_INTL_SHEETS]
-        current_idx = released[-1] if released else (len(version_names) - 1)
+        current_idx = pick_current_index(version_names, intl_counts, MIN_INTL_SHEETS)
         self.current_version: str | None = version_names[current_idx] if version_names else None
         self.previous_version: str | None = version_names[current_idx - 1] if current_idx >= 1 else None
 
@@ -206,3 +214,12 @@ def get_catalog() -> SongCatalog:
     if _catalog is None:
         _catalog = SongCatalog()
     return _catalog
+
+
+def reload_catalog() -> SongCatalog:
+    """Rebuilds the catalog from disk and swaps it in. Blocking (alias fetch + JSON
+    parse): call via asyncio.to_thread. If loading raises, the old catalog stays."""
+    global _catalog
+    fresh = SongCatalog()
+    _catalog = fresh
+    return fresh

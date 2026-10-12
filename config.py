@@ -84,6 +84,9 @@ class Config:
         # If that server can't be reached, renders fall back to this machine.
         self.chart_render_server = str(data.get("chart_render_server", "") or "").strip().rstrip("/")
         self.chart_render_key = render_key
+        # Keep data/dxdata.json fresh from upstream while the bot runs (cogs/dxdata.py).
+        # Set false to update by hand with update_dxdata.py instead.
+        self.auto_update_dxdata = bool(data.get("auto_update_dxdata", True))
 
 
 config = Config()
