@@ -11,6 +11,9 @@ sheet is resolved to what an INTL player sees:
   than JP, and a few charts sit in a different version).
 * `intl` records whether the chart exists on INTL at all. JP-only charts keep their
   JP values and `intl: false`; the bot tags them instead of hiding them.
+* When an INTL chart's constant differs from JP's, the JP value is kept as
+  `jpInternalLevelValue` / `jpLevel`, so /cc-info can flag the change INTL will most
+  likely get next update.
 
 The catalog derives the current INTL version from these flags, so a refresh after
 an INTL update needs no code change. Song order is preserved (existing songs keep
@@ -32,7 +35,7 @@ def resolve_sheet(raw: dict) -> dict:
     """One upstream sheet -> the trimmed INTL view stored in data/dxdata.json."""
     override = (raw.get("regionOverrides") or {}).get("intl") or {}
     regions = raw.get("regions") or {}
-    return {
+    out = {
         "type": raw.get("type"),
         "difficulty": raw.get("difficulty"),
         "level": override.get("level", raw.get("level")),
@@ -44,6 +47,11 @@ def resolve_sheet(raw: dict) -> dict:
         "noteCounts": raw.get("noteCounts"),
         "intl": bool(regions.get("intl", False)),
     }
+    jp_value = raw.get("internalLevelValue")
+    if out["intl"] and jp_value is not None and jp_value != out["internalLevelValue"]:
+        out["jpInternalLevelValue"] = jp_value
+        out["jpLevel"] = raw.get("level")
+    return out
 
 
 def resolve_song(raw: dict) -> dict:

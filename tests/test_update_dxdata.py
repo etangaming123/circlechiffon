@@ -35,3 +35,12 @@ def test_build_keeps_existing_song_order_and_appends_new():
     songs = [{"songId": s, "title": s, "sheets": []} for s in ("c", "a", "b")]
     out = u.build({"songs": songs, "versions": []}, existing_order=["a", "b"])
     assert [s["songId"] for s in out["songs"]] == ["a", "b", "c"]
+
+
+def test_jp_constant_is_kept_only_when_intl_differs():
+    differs = u.resolve_sheet(raw_sheet(regionOverrides={"intl": {"level": "12+", "levelValue": 12.7}}))
+    assert differs["internalLevelValue"] == 12.7
+    assert (differs["jpInternalLevelValue"], differs["jpLevel"]) == (13.0, "13")
+    assert "jpInternalLevelValue" not in u.resolve_sheet(raw_sheet())
+    jp_only = u.resolve_sheet(raw_sheet(regions={"jp": True, "intl": False}))
+    assert "jpInternalLevelValue" not in jp_only        # JP-only charts already show the JP value

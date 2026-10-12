@@ -220,3 +220,10 @@ def test_search_puts_intl_ahead_of_jp_only_on_ties(make_catalog):
     ])
     ids = [s.song_id for s in cat.search("abc")]
     assert ids.index("intl-exact") < ids.index("jp-exact") < ids.index("intl-sub") < ids.index("jp-sub")
+
+
+def test_jp_constant_is_parsed(make_catalog):
+    cat = make_catalog([song("moved", [sheet(level=12.7, jpInternalLevelValue=13.0, jpLevel="13")]), song("same")])
+    moved, same = cat.get("moved").sheets[0], cat.get("same").sheets[0]
+    assert (moved.internal_level_value, moved.jp_internal_level_value, moved.jp_level) == (12.7, 13.0, "13")
+    assert same.jp_internal_level_value is None

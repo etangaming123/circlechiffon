@@ -55,6 +55,8 @@ def _parse_sheet(raw: dict) -> Sheet:
         release_date=raw.get("releaseDate"),
         note_counts=_parse_note_counts(raw.get("noteCounts")),
         intl=raw.get("intl", True),
+        jp_internal_level_value=raw.get("jpInternalLevelValue"),
+        jp_level=raw.get("jpLevel"),
     )
 
 

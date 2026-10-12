@@ -51,6 +51,10 @@ class Sheet:
     # False = JP-only chart (not on maimai DX NET INTL). Defaults True so data
     # written before the flag existed, and test fixtures, read as available.
     intl: bool = True
+    # JP's constant/level when it differs from this (INTL) one - INTL usually
+    # catches up with it on the next update. None = same on both regions.
+    jp_internal_level_value: float | None = None
+    jp_level: str | None = None
 
 
 @dataclass(slots=True, kw_only=True)

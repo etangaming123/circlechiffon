@@ -8,7 +8,7 @@ from circlechiffon.adapters.dxrating.tags import get_tags_client
 from circlechiffon.adapters.maimai_net.errors import MaimaiNetError, SessionExpired
 from circlechiffon.ratingcalc.calculator import calculate_rating, grade_rating_ranges
 from circlechiffon.songdata.catalog import get_catalog
-from circlechiffon.types import ComboFlag, Difficulty, Song
+from circlechiffon.types import ComboFlag, Difficulty, Sheet, Song
 
 _DIFFICULTY_CHOICES = [
     app_commands.Choice(name="BASIC", value="basic"),
@@ -38,6 +38,15 @@ def _autocomplete_label(song: Song, query_lower: str) -> str:
     return label[:100]
 
 
+def _constant_text(sheet: Sheet) -> str:
+    """The chart constant as INTL has it now; when JP already moved it, add the
+    value INTL will most likely get, e.g. "13.4 → 13.6 next upd"."""
+    value = sheet.internal_level_value
+    if value is not None and sheet.intl and sheet.jp_internal_level_value not in (None, value):
+        return f"{value} → {sheet.jp_internal_level_value} next upd"
+    return str(value)
+
+
 def _rating_by_grade(constant: float) -> str:
     """"S: 267-270" lines: the rating a chart of this constant gives at each S-and-above grade."""
     return "\n".join(
@@ -50,7 +59,7 @@ def _build_generic_embed(song: Song) -> discord.Embed:
     for sheet in song.sheets:
         diff_name = sheet.difficulty.display_name if sheet.difficulty else "UTAGE"
         type_name = sheet.type.value.upper() if sheet.type else "?"
-        const_str = f" [{sheet.internal_level_value}]" if sheet.internal_level_value else ""
+        const_str = f" [{_constant_text(sheet)}]" if sheet.internal_level_value else ""
         jp_tag = " *(JP only)*" if not sheet.intl and not song.jp_only else ""
         lines.append(f"**{diff_name}** [{type_name}] - {sheet.level}{const_str}{jp_tag}")
 
@@ -88,7 +97,7 @@ async def _build_detailed_embed(song: Song, difficulty: Difficulty) -> discord.E
 
     for sheet in matching_sheets:
         type_name = sheet.type.value.upper() if sheet.type else "?"
-        lines = [f"Level **{sheet.level}** [{sheet.internal_level_value}]"]
+        lines = [f"Level **{sheet.level}** [{_constant_text(sheet)}]"]
         if not sheet.intl and any(s.intl for s in matching_sheets):
             lines.append(f"**{_NOT_IN_INTL}** (JP only)")
         if sheet.internal_level_value:
