@@ -13,6 +13,7 @@ from sqlalchemy import delete
 import crypto_utils
 from circlechiffon.adapters.maimai_net.client import MaimaiNetClient
 from circlechiffon.adapters.maimai_net.errors import MaimaiNetError, SessionExpired
+from circlechiffon import session_queue
 from circlechiffon.database import engine as db_engine
 from circlechiffon.database.models import Account, CollectionPreset, LeechLink
 
@@ -127,6 +128,20 @@ async def reauth(discord_id: int) -> MaimaiNetClient | None:
 
 
 async def with_client(
+    discord_id: int,
+    operation,
+    on_retry: Callable[[], Awaitable[None]] | None = None,
+    is_owner: bool = True,
+):
+    """Queue behind any other operation on this SEGA ID (one in flight per
+    account - see session_queue), then run `_with_client`. The owner of the
+    account (`is_owner`, the default) skips ahead of waiting leechers but never
+    interrupts the running operation; leech.with_host_client passes False."""
+    async with session_queue.slot(discord_id, is_owner):
+        return await _with_client(discord_id, operation, on_retry)
+
+
+async def _with_client(
     discord_id: int,
     operation,
     on_retry: Callable[[], Awaitable[None]] | None = None,

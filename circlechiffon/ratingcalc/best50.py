@@ -36,7 +36,12 @@ class Best50Result:
         return self.b15_total + self.b35_total
 
 
-def calculate_best50(scores: list[Score], catalog: SongCatalog, *, next_update_preview: bool = False) -> Best50Result:
+def calculate_best50(
+    scores: list[Score], catalog: SongCatalog, *, next_update_preview: bool = False, worst: bool = False
+) -> Best50Result:
+    # worst=True is /cc-worst: the same B15/B35 buckets, but the LOWEST rated
+    # plays, ascending. Unplayed charts (score.played False - the scores list
+    # carries them with achievement 0.0, same as a real 0% play) are skipped, otherwise they'd always be the worst.
     # next_update_preview simulates the current+previous B15 window
     # narrowing to just current_version, as if previous_version had just
     # aged out on the next game update - anything that drops out of the B15
@@ -58,6 +63,8 @@ def calculate_best50(scores: list[Score], catalog: SongCatalog, *, next_update_p
             # internal_level_value), so without this they'd otherwise match
             # a sheet and get bucketed in same as any other chart.
             continue
+        if worst and not score.played:
+            continue
         sheet = catalog.find_sheet(score.title, score.chart_type, score.difficulty)
         if sheet is None or sheet.internal_level_value is None:
             continue
@@ -74,8 +81,8 @@ def calculate_best50(scores: list[Score], catalog: SongCatalog, *, next_update_p
     # whatever order client.get_music_scores() happened to return. Ties also
     # decide which entries make the cut at the 15/35 boundary, not just how
     # they're displayed.
-    current_entries.sort(key=lambda e: (e.rating, e.score.achievement), reverse=True)
-    older_entries.sort(key=lambda e: (e.rating, e.score.achievement), reverse=True)
+    current_entries.sort(key=lambda e: (e.rating, e.score.achievement), reverse=not worst)
+    older_entries.sort(key=lambda e: (e.rating, e.score.achievement), reverse=not worst)
 
     b15 = current_entries[:15]
     b35 = older_entries[:35]

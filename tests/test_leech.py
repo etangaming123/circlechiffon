@@ -167,7 +167,7 @@ def host_client(monkeypatch):
     """Route the host's session to a FakeClient; returns a setter for it."""
     state = {}
 
-    async def fake_with_client(discord_id, operation, on_retry=None):
+    async def fake_with_client(discord_id, operation, on_retry=None, is_owner=True):
         assert discord_id == HOST
         if "error" in state:
             raise state["error"]

@@ -468,6 +468,25 @@ class RecordsCog(commands.Cog):
     async def best(self, interaction: discord.Interaction, next_update: bool = False):
         if not await access.handle_command_access(interaction, interaction.user.id, "cc-best", access.MAIMAI_NET_COOLDOWN):
             return
+        await self._render_own_best(interaction, next_update=next_update)
+
+    @app_commands.command(
+        name="cc-worst",
+        description="The opposite of /cc-best. Equivalent to m>bottom",
+    )
+    @app_commands.describe(
+        next_update="Use the B15 window as it will be once the current version ages out (current-version charts only)"
+    )
+    @app_commands.allowed_installs(guilds=True, users=True)
+    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+    async def worst(self, interaction: discord.Interaction, next_update: bool = False):
+        if not await access.handle_command_access(interaction, interaction.user.id, "cc-worst", access.MAIMAI_NET_COOLDOWN):
+            return
+        await self._render_own_best(interaction, next_update=next_update, worst=True)
+
+    async def _render_own_best(self, interaction: discord.Interaction, *, next_update: bool, worst: bool = False):
+        """Shared body of /cc-best and /cc-worst; access is already checked.
+        `worst` swaps in the lowest-rated played charts and flips the image."""
         start_time = time.monotonic()
         await interaction.response.defer()
         await interaction.edit_original_response(content="Preparing...")
@@ -477,6 +496,7 @@ class RecordsCog(commands.Cog):
             await leech.serve_via_friend_path(
                 interaction, target, "_render_friend_best",
                 extra_note=" `next_update` isn't available in leech mode." if next_update else "",
+                **({"worst": True} if worst else {}),
             )
             return
 
@@ -514,13 +534,14 @@ class RecordsCog(commands.Cog):
                 return
 
             catalog = get_catalog()
-            result = calculate_best50(scores, catalog, next_update_preview=next_update)
-            share_url = build_detail_view_url(result, catalog)
+            result = calculate_best50(scores, catalog, next_update_preview=next_update, worst=worst)
+            # the detail page decodes a best-50 payload, so no link for /cc-worst
+            share_url = None if worst else build_detail_view_url(result, catalog)
 
             entries = [e for e in (result.b15 + result.b35) if e is not None]
             if not entries:
                 await interaction.edit_original_response(
-                    content="Fetched your scores, but couldn't match any of them to the song catalog to compute ratings."
+                    content="Fetched your scores, but couldn't match any played chart to the song catalog to compute ratings."
                 )
                 return
 
@@ -567,6 +588,7 @@ class RecordsCog(commands.Cog):
                 version_logo_bytes=version_logo_bytes,
                 output=buf,
                 template=template,
+                worst=worst,
             )
 
             new_entries = [e for e in result.b15 if e is not None]
@@ -575,10 +597,11 @@ class RecordsCog(commands.Cog):
             avg_overall = result.total_rating / total_count if total_count else 0
             avg_new = result.b15_total / len(new_entries) if new_entries else 0
             avg_old = result.b35_total / len(old_entries) if old_entries else 0
-            # both lists are sorted highest-rating-first, so the last actual
-            # (non-None) entry is the lowest-rated one in that bucket.
-            floor_new = new_entries[-1].rating if new_entries else None
-            floor_old = old_entries[-1].rating if old_entries else None
+            # best: sorted highest-first, so the last entry is the bucket's floor.
+            # worst: sorted lowest-first, so the last entry is its ceiling.
+            edge_new = new_entries[-1].rating if new_entries else None
+            edge_old = old_entries[-1].rating if old_entries else None
+            edge_label = "Ceiling" if worst else "Floor"
 
             elapsed = time.monotonic() - start_time
             timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
@@ -586,19 +609,21 @@ class RecordsCog(commands.Cog):
                 f"-# Preview: simulates next update (B15 = {catalog.current_version} only)\n" if next_update else ""
             )
             filename_suffix = "-preview" if next_update else ""
-            share_note = "" if share_url else "\n-# Detailed list view unavailable this time - use the image above."
+            share_note = (
+                "" if share_url or worst else "\n-# Detailed list view unavailable this time - use the image above."
+            )
             await interaction.edit_original_response(
                 content=(
                     f"{preview_note}"
-                    f"Total rating: **{result.total_rating}** "
+                    f"{'Worst-50 total' if worst else 'Total rating'}: **{result.total_rating}** "
                     f"(New Charts: **{result.b15_total}**, Old Charts: **{result.b35_total}**)\n"
                     f"Average rating: Overall **{avg_overall:.2f}**, New **{avg_new:.2f}**, Old **{avg_old:.2f}**\n"
-                    f"Floor: New: **{floor_new if floor_new is not None else 'N/A'}**, "
-                    f"Old: **{floor_old if floor_old is not None else 'N/A'}**\n"
+                    f"{edge_label}: New: **{edge_new if edge_new is not None else 'N/A'}**, "
+                    f"Old: **{edge_old if edge_old is not None else 'N/A'}**\n"
                     f"-# Rendered in `{elapsed:.2f}s`"
                     f"{share_note}"
                 ),
-                attachments=[discord.File(buf, filename=f"best50-{profile.display_name}-{timestamp}{filename_suffix}.png")],
+                attachments=[discord.File(buf, filename=f"{'worst' if worst else 'best'}50-{profile.display_name}-{timestamp}{filename_suffix}.png")],
                 view=B50ShareView(share_url) if share_url else None,
             )
         except accounts.NotLinked:

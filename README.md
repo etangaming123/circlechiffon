@@ -30,7 +30,7 @@ Commands marked 🔗 need a linked SEGA ID account. Everything else works with n
 * 🔗 `/cc-login` — Link your maimai DX NET account, via a private modal. Optional `remember_password` flag
 * `/cc-logout` — Unlink and delete everything stored about you (including any leech links)
 * 🔗 `/cc-leech-send` — Let a Discord user who has no SEGA ID use the bot through your account: pick them from your maimai DX NET friend list (by name, or by the id from `/cc-friends show_ids:True`)
-* `/cc-leech-accept` — Accept a leech offer. `/cc-profile`, `/cc-best` and `/cc-scores` then show your own data, read through the host's account with the same limits as friend data (see [leech mode](./docs/limitations.md#leech-mode)). Needs no linked account
+* `/cc-leech-accept` — Accept a leech offer. `/cc-profile`, `/cc-best`, `/cc-worst` and `/cc-scores` then show your own data, read through the host's account with the same limits as friend data (see [leech mode](./docs/limitations.md#leech-mode)). Needs no linked account
 * `/cc-leech-remove` — Remove a leech link or pending offer, whether you sent it or received it (omit `user` to remove all of yours)
 
 ### Profile & Records
@@ -39,6 +39,7 @@ Commands marked 🔗 need a linked SEGA ID account. Everything else works with n
 * 🔗 `/cc-display` — Your nameplate, rendered close to how the real cab displays it
 * 🔗 `/cc-recent` — Page through your recent plays 25 at a time; pick one from the dropdown for a judgement-breakdown image, with a button to show/hide the lost-achievement% per note
 * 🔗 `/cc-best` — Your Best-50 rating image (B15 + B35), styled after dxrating.net's
+* 🔗 `/cc-worst` — The opposite of `/cc-best`: your lowest-rated played charts (worst 15 + worst 35, unplayed charts ignored), rendered upside down
 * 🔗 `/cc-album` — Browse your maimai DX NET photo album
 
 ### Scores & Rating

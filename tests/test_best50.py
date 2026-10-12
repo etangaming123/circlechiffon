@@ -150,3 +150,41 @@ def test_catalog_with_no_versions_puts_everything_in_b35(fake_catalog):
     result = calculate_best50([score("song")], fake_catalog)
     assert all(e is None for e in result.b15)
     assert result.b35[0] is not None
+
+
+def test_worst_keeps_lowest_rated_ascending(fake_catalog):
+    scores = []
+    for i in range(20):
+        fake_catalog.add(f"new{i}", version="NEW", level=10.0 + i * 0.1)
+        scores.append(score(f"new{i}"))
+    for i in range(40):
+        fake_catalog.add(f"old{i}", version="OLD", level=10.0 + i * 0.1)
+        scores.append(score(f"old{i}"))
+    result = calculate_best50(scores, fake_catalog, worst=True)
+
+    # the lowest constants stay: new0..new14 / old0..old34, lowest first
+    assert [e.score.title for e in result.b15] == [f"new{i}" for i in range(15)]
+    assert [e.score.title for e in result.b35] == [f"old{i}" for i in range(35)]
+
+
+def test_worst_skips_unplayed_charts(fake_catalog):
+    fake_catalog.add("played", version="NEW", level=14.0)
+    fake_catalog.add("unplayed", version="NEW", level=10.0)
+    unplayed = Score(
+        title="unplayed", difficulty=Difficulty.master, chart_type=ChartType.dx, achievement=0.0, played=False
+    )
+    scores = [score("played", achievement=90.0), unplayed]
+
+    worst = calculate_best50(scores, fake_catalog, worst=True)
+    assert [e.score.title for e in worst.b15 if e] == ["played"]
+    # best mode is unchanged: it still sees the unplayed row (rates 0)
+    best = calculate_best50(scores, fake_catalog)
+    assert {e.score.title for e in best.b15 if e} == {"played", "unplayed"}
+
+
+def test_worst_keeps_played_zero_percent(fake_catalog):
+    # a real play can score 0% - only played=False rows are unplayed
+    fake_catalog.add("zero", version="NEW", level=14.0)
+    fake_catalog.add("other", version="NEW", level=10.0)
+    result = calculate_best50([score("zero", achievement=0.0), score("other", achievement=90.0)], fake_catalog, worst=True)
+    assert [e.score.title for e in result.b15 if e] == ["zero", "other"]

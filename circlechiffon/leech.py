@@ -166,7 +166,7 @@ async def with_host_client(host_id: int, operation, on_retry: Callable[[], Await
     """accounts.with_client() against the host's session, with failures worded
     for the leecher: they must never be told to /cc-login themselves."""
     try:
-        return await accounts.with_client(host_id, operation, on_retry=on_retry)
+        return await accounts.with_client(host_id, operation, on_retry=on_retry, is_owner=False)
     except accounts.NotLinked:
         raise LeechBroken("The host of your leech link has unlinked their account. Ask them to set it up again.")
     except SessionExpired:
@@ -205,7 +205,9 @@ async def not_linked_text(user_id: int) -> str:
     return NOT_LINKED_MESSAGE
 
 
-async def serve_via_friend_path(interaction, target: LeechLink, method: str, extra_note: str = "") -> None:
+async def serve_via_friend_path(
+    interaction, target: LeechLink, method: str, extra_note: str = "", **kwargs
+) -> None:
     """Run one of FriendsCog's single-friend renderers (`_send_friend_profile`
     or `_render_friend_best`) for the leecher's own friend entry, through the
     host's session. `interaction` must already be deferred."""
@@ -221,5 +223,5 @@ async def serve_via_friend_path(interaction, target: LeechLink, method: str, ext
         return
     friends = interaction.client.get_cog("FriendsCog")
     await getattr(friends, method)(
-        interaction, entry, session_id=target.host_id, note=f"{data_note()}{extra_note}"
+        interaction, entry, session_id=target.host_id, note=f"{data_note()}{extra_note}", **kwargs
     )

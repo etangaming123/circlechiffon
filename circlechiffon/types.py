@@ -117,6 +117,9 @@ class Score:
     difficulty: Difficulty | None
     chart_type: ChartType | None
     achievement: float  # percentage, e.g. 100.5
+    # False for a chart row with no score at all (never played). A played
+    # chart can still have achievement == 0, so don't infer one from the other.
+    played: bool = True
     dx_score: int | None = None  # achieved
     dx_score_total: int | None = None  # max possible for this chart
     combo_flag: ComboFlag | None = None

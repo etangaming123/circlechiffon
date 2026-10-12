@@ -254,7 +254,7 @@ def _heavy_warning(song: Song, difficulty: Difficulty) -> str:
     return (
         f"About to fetch friend scores for {song.title} [{difficulty.display_name}]..."
         "Hold up! This command is a heavy command. It will take quite a bit, and it fetches a bunch of data. If you'd like to proceed, please confirm below."
-        f"-# Cooldown is {access.MAIMAI_NET_HEAVY_COOLDOWN}s after clicking the button. If you cancel, the cooldown will not be activated."
+        f"\n-# Cooldown is {access.MAIMAI_NET_HEAVY_COOLDOWN}s after clicking the button. If you cancel, the cooldown will not be activated."
     )
 
 
@@ -712,6 +712,7 @@ class FriendsCog(commands.Cog):
         *,
         session_id: int | None = None,
         note: str | None = None,
+        worst: bool = False,
     ):
         """Fetches scores + renders the best-50 image, editing `interaction`'s
         response throughout. Works from either the original slash-command
@@ -750,7 +751,7 @@ class FriendsCog(commands.Cog):
                 return
 
             catalog = get_catalog()
-            result = calculate_best50(scores, catalog)
+            result = calculate_best50(scores, catalog, worst=worst)
 
             entries = [e for e in (result.b15 + result.b35) if e is not None]
             if not entries:
@@ -795,13 +796,14 @@ class FriendsCog(commands.Cog):
                 version_logo_bytes=version_logo_bytes,
                 output=buf,
                 template=template,
+                worst=worst,
             )
 
             elapsed = time.monotonic() - start_time
             timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
             await interaction.edit_original_response(
                 content=(
-                    f"Computed rating: **{result.total_rating}** "
+                    f"{'Computed worst-50 total' if worst else 'Computed rating'}: **{result.total_rating}** "
                     f"(New Charts: **{result.b15_total}**, Old Charts: **{result.b35_total}**)\n"
                     f"-# Rendered in `{elapsed:.2f}s`"
                     + (f"\n-# {note}" if note else "")
