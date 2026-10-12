@@ -177,3 +177,46 @@ def test_real_catalog_loads():
     assert all(s.title.strip() for s in cat.songs)
     # a title that has existed since the first DX release
     assert cat.search("Supersonic Generation")
+
+
+# -- INTL availability ------------------------------------------------------------
+
+
+def test_sheets_default_to_intl_and_flag_is_parsed(make_catalog):
+    cat = make_catalog([song("both", [sheet(intl=True), sheet(difficulty="expert", intl=False)]),
+                        song("jp", [sheet(intl=False)]), song("old data")])
+    assert [s.intl for s in cat.get("both").sheets] == [True, False]
+    assert not cat.get("both").jp_only
+    assert cat.get("jp").jp_only
+    assert not cat.get("old data").jp_only        # no flag in the data = available
+
+
+def test_current_version_is_the_latest_one_released_on_intl(make_catalog, monkeypatch):
+    monkeypatch.setattr(catalog_module, "MIN_INTL_SHEETS", 3)
+    songs = [song(f"new{i}", [sheet(version="NEW", intl=True)]) for i in range(3)]
+    songs += [song(f"jp{i}", [sheet(version="JPNEXT", intl=False)]) for i in range(5)]
+    # a JP-version song flagged INTL early is below the threshold, so it can't move the window
+    songs.append(song("early", [sheet(version="JPNEXT", intl=True)]))
+    cat = make_catalog(songs, versions=(("OLD",), ("PREV",), ("NEW",), ("JPNEXT",)))
+    assert (cat.current_version, cat.previous_version) == ("NEW", "PREV")
+    assert cat.get("early").sheets[0].version == "NEW"      # bucketed as current, not as a future version
+    assert cat.get("jp0").sheets[0].version == "JPNEXT"     # JP-only charts keep their own version
+
+
+def test_current_version_moves_when_intl_gets_the_next_version(make_catalog, monkeypatch):
+    monkeypatch.setattr(catalog_module, "MIN_INTL_SHEETS", 3)
+    songs = [song(f"s{i}", [sheet(version=v, intl=True)]) for v in ("PREV", "NEW", "JPNEXT") for i in range(3)]
+    cat = make_catalog([song(f"{s['title']}-{i}", s["sheets"], song_id=f"{s['songId']}-{i}") for i, s in enumerate(songs)],
+                       versions=(("OLD",), ("PREV",), ("NEW",), ("JPNEXT",)))
+    assert (cat.current_version, cat.previous_version) == ("JPNEXT", "NEW")
+
+
+def test_search_puts_intl_ahead_of_jp_only_on_ties(make_catalog):
+    cat = make_catalog([
+        song("abc", [sheet(intl=False)], song_id="jp-exact"),
+        song("abc", [sheet(intl=True)], song_id="intl-exact"),
+        song("xabc", [sheet(intl=False)], song_id="jp-sub"),
+        song("yabc", [sheet(intl=True)], song_id="intl-sub"),
+    ])
+    ids = [s.song_id for s in cat.search("abc")]
+    assert ids.index("intl-exact") < ids.index("jp-exact") < ids.index("intl-sub") < ids.index("jp-sub")

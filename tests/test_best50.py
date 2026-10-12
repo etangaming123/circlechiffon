@@ -188,3 +188,48 @@ def test_worst_keeps_played_zero_percent(fake_catalog):
     fake_catalog.add("other", version="NEW", level=10.0)
     result = calculate_best50([score("zero", achievement=0.0), score("other", achievement=90.0)], fake_catalog, worst=True)
     assert [e.score.title for e in result.b15 if e] == ["zero", "other"]
+
+
+# -- summarize / format_stats --------------------------------------------------------
+#   100.0 achievement is SSS (21.6): 13.0 -> 280.8 -> 280, 12.0 -> 259.2 -> 259, 11.0 -> 237.6 -> 237
+
+
+def test_summarize_partial_new_bucket_and_empty_old(fake_catalog):
+    from circlechiffon.ratingcalc.best50 import summarize
+
+    scores = []
+    for name, level in [("a", 13.0), ("b", 12.0), ("c", 11.0)]:
+        fake_catalog.add(name, version="NEW", level=level)
+        scores.append(score(name))
+    stats = summarize(calculate_best50(scores, fake_catalog))
+
+    assert (stats.top_new, stats.edge_new) == (280, 237)
+    assert stats.avg_new == (280 + 259 + 237) / 3
+    assert stats.avg_overall == stats.avg_new
+    assert stats.top_old is None and stats.edge_old is None and stats.avg_old == 0
+    assert not stats.new_full and not stats.old_full
+
+
+def test_summarize_reports_full_buckets(fake_catalog):
+    from circlechiffon.ratingcalc.best50 import summarize
+
+    scores = []
+    for i in range(15):
+        fake_catalog.add(f"n{i}", version="NEW", level=10.0 + i * 0.1)
+        scores.append(score(f"n{i}"))
+    for i in range(35):
+        fake_catalog.add(f"o{i}", version="OLD", level=10.0 + i * 0.1)
+        scores.append(score(f"o{i}"))
+    stats = summarize(calculate_best50(scores, fake_catalog))
+    assert stats.new_full and stats.old_full
+
+
+def test_format_stats_labels(fake_catalog):
+    from circlechiffon.ratingcalc.best50 import format_stats, summarize
+
+    fake_catalog.add("a", version="NEW", level=13.0)
+    stats = summarize(calculate_best50([score("a")], fake_catalog))
+    best = format_stats(stats)
+    assert "Floor: Old: **N/A**, New: **280**" in best and "Max: Old: **N/A**, New: **280**" in best
+    worst = format_stats(stats, worst=True)
+    assert "Ceiling:" in worst and "Min:" in worst

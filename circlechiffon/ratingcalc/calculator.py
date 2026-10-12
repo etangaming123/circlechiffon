@@ -94,3 +94,36 @@ def rank_for_achievement(achievement: float) -> str:
 
 def rank_tag_for_achievement(achievement: float) -> str:
     return calculate_rating(0, achievement).rank_tag
+
+
+# (rank name, lowest achievement%, highest achievement%) for the S-and-above grades.
+# The top of each band is the last representable value below the next grade, so
+# the coefficient bumps at 98.9999 / 99.9999 / 100.4999 are included.
+S_GRADE_BANDS: list[tuple[str, float, float]] = [
+    ("S", 97.0, 97.9999),
+    ("S+", 98.0, 98.9999),
+    ("SS", 99.0, 99.4999),
+    ("SS+", 99.5, 99.9999),
+    ("SSS", 100.0, 100.4999),
+    ("SSS+", 100.5, 100.5),
+]
+
+
+@dataclass(slots=True, frozen=True)
+class GradeRange:
+    rank: str
+    low: int  # rating at the grade's lowest achievement
+    high: int  # rating at its highest achievement
+
+
+def grade_rating_ranges(internal_level: float) -> list[GradeRange]:
+    """Rating gained by a chart of this constant at each S-and-above grade, as
+    the (min, max) over the grade's achievement band. Excludes the AP bonus."""
+    return [
+        GradeRange(
+            rank=rank,
+            low=calculate_rating(internal_level, low_ach).rating,
+            high=calculate_rating(internal_level, high_ach).rating,
+        )
+        for rank, low_ach, high_ach in S_GRADE_BANDS
+    ]

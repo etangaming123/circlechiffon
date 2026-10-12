@@ -95,3 +95,34 @@ def test_table_is_sorted_and_coefficients_never_decrease():
     coefficients = [row[1] for row in SCORE_COEFFICIENT_TABLE]
     assert breakpoints == sorted(breakpoints)
     assert coefficients == sorted(coefficients)
+
+
+# -- grade_rating_ranges: (rank, rating at the band's lowest achievement, at its highest) --
+#   14.0 chart; the band tops use the bumped coefficients (98.9999 -> 20.6, 99.9999 -> 21.4, 100.4999 -> 22.2)
+#   S    97.0    20.0 * 14 * 0.97     = 271.6 -> 271    97.9999  20.0 * 14 * 0.979999 = 274.4  -> 274
+#   S+   98.0    20.3 * 14 * 0.98     = 278.5 -> 278    98.9999  20.6 * 14 * 0.989999 = 285.5  -> 285
+#   SS   99.0    20.8 * 14 * 0.99     = 288.3 -> 288    99.4999  20.8 * 14 * 0.994999 = 289.7  -> 289
+#   SS+  99.5    21.1 * 14 * 0.995    = 293.9 -> 293    99.9999  21.4 * 14 * 0.999999 = 299.6  -> 299
+#   SSS  100.0   21.6 * 14 * 1.0      = 302.4 -> 302    100.4999 22.2 * 14 * 1.004999 = 312.35 -> 312
+#   SSS+ 100.5   22.4 * 14 * 1.005    = 315.168 -> 315 (single value)
+def test_grade_rating_ranges_on_a_14_chart():
+    from circlechiffon.ratingcalc.calculator import grade_rating_ranges
+
+    got = [(r.rank, r.low, r.high) for r in grade_rating_ranges(14.0)]
+    assert got == [
+        ("S", 271, 274),
+        ("S+", 278, 285),
+        ("SS", 288, 289),
+        ("SS+", 293, 299),
+        ("SSS", 302, 312),
+        ("SSS+", 315, 315),
+    ]
+
+
+def test_grade_ranges_never_overlap_downward():
+    from circlechiffon.ratingcalc.calculator import grade_rating_ranges
+
+    for tenths in range(100, 151):
+        ranges = grade_rating_ranges(tenths / 10)
+        flat = [v for r in ranges for v in (r.low, r.high)]
+        assert flat == sorted(flat), tenths

@@ -1,5 +1,6 @@
 import asyncio
 import difflib
+import functools
 import io
 import time
 import unicodedata
@@ -15,8 +16,9 @@ from circlechiffon.adapters.dxrating.images import get_jackets_bulk, jacket_url
 from circlechiffon.adapters.maimai_net.badge_icons import get_all_badge_icons
 from circlechiffon.adapters.maimai_site.version_logo import get_version_logo
 from circlechiffon.adapters.maimai_net.errors import MaimaiNetError, SessionExpired
-from circlechiffon.ratingcalc.best50 import calculate_best50
+from circlechiffon.ratingcalc.best50 import calculate_best50, format_stats, summarize
 from circlechiffon.ratingcalc.calculator import rank_tag_for_achievement
+from circlechiffon.ratingcalc.tips import format_tips
 from circlechiffon.customisation.store import get_user_template
 from circlechiffon.renderers.b50 import render_b50
 from circlechiffon.renderers.profile import render_friend_profile
@@ -665,10 +667,13 @@ class FriendsCog(commands.Cog):
         name="cc-friend-best",
         description="Render a friend's best-50 rating image, computed from their scores.",
     )
-    @app_commands.describe(friend="Friend's display name (or their exact id from /cc-friends show_ids:True)")
+    @app_commands.describe(
+        friend="Friend's display name (or their exact id from /cc-friends show_ids:True)",
+        tips="Also show which chart constants (and the lowest S grade on them) would raise their rating",
+    )
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-    async def friend_best(self, interaction: discord.Interaction, friend: str):
+    async def friend_best(self, interaction: discord.Interaction, friend: str, tips: bool = False):
         if not await access.handle_command_access(
             interaction, interaction.user.id, "cc-friend-best", access.MAIMAI_NET_COOLDOWN
         ):
@@ -687,11 +692,13 @@ class FriendsCog(commands.Cog):
                 await interaction.edit_original_response(content=f"No friend found matching `{friend}`.")
                 return
             if isinstance(resolved, list):
-                view = FriendPickView(interaction.user.id, resolved, self._render_friend_best)
+                view = FriendPickView(
+                    interaction.user.id, resolved, functools.partial(self._render_friend_best, tips=tips)
+                )
                 await interaction.edit_original_response(content=_pick_prompt(resolved), view=view)
                 view.message = await interaction.original_response()
                 return
-            await self._render_friend_best(interaction, resolved)
+            await self._render_friend_best(interaction, resolved, tips=tips)
         except accounts.NotLinked:
             await interaction.edit_original_response(
                 content=await leech.not_linked_text(interaction.user.id)
@@ -713,6 +720,7 @@ class FriendsCog(commands.Cog):
         session_id: int | None = None,
         note: str | None = None,
         worst: bool = False,
+        tips: bool = False,
     ):
         """Fetches scores + renders the best-50 image, editing `interaction`'s
         response throughout. Works from either the original slash-command
@@ -801,12 +809,22 @@ class FriendsCog(commands.Cog):
 
             elapsed = time.monotonic() - start_time
             timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+            stats = summarize(result)
+            tips_text = ""
+            if tips and not worst:
+                # a bucket that isn't full has no floor to beat: any play adds rating
+                tips_text = "\n" + format_tips(
+                    stats.edge_new if stats.new_full else None,
+                    stats.edge_old if stats.old_full else None,
+                )
             await interaction.edit_original_response(
                 content=(
                     f"{'Computed worst-50 total' if worst else 'Computed rating'}: **{result.total_rating}** "
-                    f"(New Charts: **{result.b15_total}**, Old Charts: **{result.b35_total}**)\n"
+                    f"(Old Charts: **{result.b35_total}**, New Charts: **{result.b15_total}**)\n"
+                    f"{format_stats(stats, worst=worst)}"
                     f"-# Rendered in `{elapsed:.2f}s`"
                     + (f"\n-# {note}" if note else "")
+                    + tips_text
                 ),
                 attachments=[discord.File(buf, filename=f"friend-best50-{entry.profile.display_name}-{timestamp}.png")],
                 view=None,

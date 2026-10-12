@@ -2,8 +2,8 @@
 Best-50 bucketing: the best 15 rated scores among charts from the current
 game version OR the one before it (B15 - "new"), plus the best 35 rated
 scores among everything else (B35 - "old"). Version resolution comes from
-dxdata.json itself (SongCatalog.current_version/previous_version - the last
-two entries in its chronologically-ordered top-level "versions" list).
+dxdata.json itself (SongCatalog.current_version/previous_version - the latest
+version released on INTL and the one before it).
 Bucket sizing follows gekichumai/dxrating's calculateBest50
 (packages/maimai-domain/src/best50.ts, MIT); the current+previous version
 window for B15 eligibility is this bot's own definition, not dxrating's.
@@ -47,7 +47,8 @@ def calculate_best50(
     # aged out on the next game update - anything that drops out of the B15
     # set below still gets bucketed into older_entries (B35) as usual,
     # rather than being dropped, matching the real "ages out" mechanic. It
-    # can't predict actual unreleased charts since dxdata.json has none.
+    # can't predict actual unreleased charts: JP-only charts have no INTL score
+    # to bucket.
     if next_update_preview:
         new_versions = {v for v in (catalog.current_version,) if v is not None}
     else:
@@ -92,4 +93,52 @@ def calculate_best50(
         b35=b35 + [None] * (35 - len(b35)),
         b15_total=sum(e.rating for e in b15),
         b35_total=sum(e.rating for e in b35),
+    )
+
+
+@dataclass(slots=True, frozen=True)
+class Best50Stats:
+    """Summary numbers shown under a rendered b50. `edge_*` is the bucket's last
+    entry (the floor of a best list, the ceiling of a worst list) and `top_*` its
+    first (the max of a best list, the min of a worst list)."""
+
+    avg_overall: float
+    avg_new: float
+    avg_old: float
+    edge_new: int | None
+    edge_old: int | None
+    top_new: int | None
+    top_old: int | None
+    new_full: bool
+    old_full: bool
+
+
+def summarize(result: Best50Result) -> Best50Stats:
+    new_entries = [e for e in result.b15 if e is not None]
+    old_entries = [e for e in result.b35 if e is not None]
+    total_count = len(new_entries) + len(old_entries)
+    return Best50Stats(
+        avg_overall=result.total_rating / total_count if total_count else 0,
+        avg_new=result.b15_total / len(new_entries) if new_entries else 0,
+        avg_old=result.b35_total / len(old_entries) if old_entries else 0,
+        edge_new=new_entries[-1].rating if new_entries else None,
+        edge_old=old_entries[-1].rating if old_entries else None,
+        top_new=new_entries[0].rating if new_entries else None,
+        top_old=old_entries[0].rating if old_entries else None,
+        new_full=len(new_entries) == len(result.b15),
+        old_full=len(old_entries) == len(result.b35),
+    )
+
+
+def format_stats(stats: Best50Stats, *, worst: bool = False) -> str:
+    """The Average / Floor / Max lines (Ceiling / Min for a worst list), Old before New like the b50 image."""
+
+    def fmt(value: int | None) -> str:
+        return str(value) if value is not None else "N/A"
+
+    edge_label, top_label = ("Ceiling", "Min") if worst else ("Floor", "Max")
+    return (
+        f"Average rating: Overall **{stats.avg_overall:.2f}**, Old **{stats.avg_old:.2f}**, New **{stats.avg_new:.2f}**\n"
+        f"{edge_label}: Old: **{fmt(stats.edge_old)}**, New: **{fmt(stats.edge_new)}**\n"
+        f"{top_label}: Old: **{fmt(stats.top_old)}**, New: **{fmt(stats.top_new)}**\n"
     )

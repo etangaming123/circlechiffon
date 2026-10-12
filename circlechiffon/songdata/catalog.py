@@ -1,10 +1,12 @@
 """
 Loads the vendored song/chart catalog (data/dxdata.json, trimmed from
-gekichumai/dxrating's packages/dxdata/dxdata.json, MIT-licensed) into memory
-and provides lookup/search over it.
+gekichumai/dxrating's packages/dxdata/dxdata.json by update_dxdata.py, MIT-licensed,
+resolved to INTL values with a per-sheet `intl` flag) into memory and provides
+lookup/search over it.
 """
 
 import json
+from collections import Counter
 from difflib import SequenceMatcher
 from pathlib import Path
 
@@ -12,6 +14,12 @@ from circlechiffon.adapters.dxrating.aliases import fetch_aliases_by_song_id
 from circlechiffon.types import ChartType, Difficulty, NoteCounts, Sheet, Song
 
 DATA_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "dxdata.json"
+
+# A game version counts as "released on INTL" once this many of its charts are
+# flagged intl. The source data marks a few charts of a JP-only version as INTL
+# early (event/locked songs), so "any intl chart" would jump the B15 window
+# ahead of the real INTL version.
+MIN_INTL_SHEETS = 20
 
 
 def _parse_note_counts(raw: dict | None) -> NoteCounts | None:
@@ -46,6 +54,7 @@ def _parse_sheet(raw: dict) -> Sheet:
         note_designer=raw.get("noteDesigner"),
         release_date=raw.get("releaseDate"),
         note_counts=_parse_note_counts(raw.get("noteCounts")),
+        intl=raw.get("intl", True),
     )
 
 
@@ -91,14 +100,28 @@ class SongCatalog:
                 if alias not in song.search_acronyms:
                     song.search_acronyms.append(alias)
 
-        # dxdata.json's top-level "versions" list is chronologically ordered
-        # (confirmed against the source: last entry is the most recently
-        # released game version) - used to bucket best-50 scores into
-        # "new" (B15: current version + one version prior) vs "old" (B35:
-        # everything else), per the user's own rating-window definition.
-        versions = raw.get("versions") or []
-        self.current_version: str | None = versions[-1]["version"] if versions else None
-        self.previous_version: str | None = versions[-2]["version"] if len(versions) >= 2 else None
+        # dxdata.json's top-level "versions" list is chronologically ordered, but
+        # its last entry is the newest *JP* version, which INTL trails by months.
+        # The current INTL version is the latest one with MIN_INTL_SHEETS or more
+        # INTL-flagged charts, so a data refresh after an INTL update moves it
+        # without a code change. It is used to bucket best-50 scores into "new"
+        # (B15: current version + one version prior) vs "old" (B35).
+        version_names = [v["version"] for v in raw.get("versions") or []]
+        intl_counts = Counter(sh.version for song in self.songs for sh in song.sheets if sh.intl)
+        released = [i for i, name in enumerate(version_names) if intl_counts[name] >= MIN_INTL_SHEETS]
+        current_idx = released[-1] if released else (len(version_names) - 1)
+        self.current_version: str | None = version_names[current_idx] if version_names else None
+        self.previous_version: str | None = version_names[current_idx - 1] if current_idx >= 1 else None
+
+        # INTL charts tagged with a version newer than the current INTL one (a
+        # locked song of the next version showing up early) belong to the
+        # current version for bucketing.
+        if self.current_version is not None:
+            rank = {name: i for i, name in enumerate(version_names)}
+            for song in self.songs:
+                for sh in song.sheets:
+                    if sh.intl and rank.get(sh.version, -1) > current_idx:
+                        sh.version = self.current_version
 
         self._by_title_lower: dict[str, list[Song]] = {}
         self._by_title_lower: dict[str, list[Song]] = {}
@@ -164,8 +187,11 @@ class SongCatalog:
         # with a few exact/substring hits still gets backfilled with close
         # names once those run out, instead of being capped at whichever
         # tier happened to match first.
-        substring_matches.sort(key=lambda t: t[0], reverse=True)
-        fuzzy_candidates.sort(key=lambda t: t[0], reverse=True)
+        # INTL charts win ties (and sort ahead within the exact tier): JP-only
+        # charts stay findable but never outrank an equally good INTL match.
+        substring_matches.sort(key=lambda t: (-t[0], t[1].jp_only))
+        fuzzy_candidates.sort(key=lambda t: (-t[0], t[1].jp_only))
+        exact_matches.sort(key=lambda song: song.jp_only)
         ordered = exact_matches + [s for _, s in substring_matches] + [s for _, s in fuzzy_candidates]
         return ordered[:limit]
 

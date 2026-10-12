@@ -98,6 +98,20 @@ def test_best_reaches_the_friend_renderer(leeching):
     assert rendered and rendered[0][:2] == ("idx1", HOST)
 
 
+def test_best_tips_reach_the_friend_renderer_only_when_asked(leeching):
+    rendered = []
+
+    class SpyFriends(FriendsCog):
+        async def _render_friend_best(self, interaction, entry, *, session_id=None, note=None, tips=False):
+            rendered.append(tips)
+
+    inter = FakeInteraction(LEECHER, {"FriendsCog": SpyFriends(None)})
+    cog = RecordsCog(None)
+    asyncio.run(RecordsCog.best.callback(cog, inter))
+    asyncio.run(RecordsCog.best.callback(cog, inter, tips=True))
+    assert rendered == [False, True]
+
+
 def test_profile_core_reaches_the_friend_renderer_and_extra_is_refused(leeching):
     rendered = []
 

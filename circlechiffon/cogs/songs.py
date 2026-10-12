@@ -6,7 +6,7 @@ from circlechiffon import access, accounts, embed_colors
 from circlechiffon.adapters.dxrating.images import jacket_url
 from circlechiffon.adapters.dxrating.tags import get_tags_client
 from circlechiffon.adapters.maimai_net.errors import MaimaiNetError, SessionExpired
-from circlechiffon.ratingcalc.calculator import calculate_rating
+from circlechiffon.ratingcalc.calculator import calculate_rating, grade_rating_ranges
 from circlechiffon.songdata.catalog import get_catalog
 from circlechiffon.types import ComboFlag, Difficulty, Song
 
@@ -19,16 +19,30 @@ _DIFFICULTY_CHOICES = [
 ]
 
 
+_JP_ONLY_TAG = " [JP only]"
+_NOT_IN_INTL = "Not available in INTL"
+
+
 def _autocomplete_label(song: Song, query_lower: str) -> str:
     """Label a song choice with whichever alias matched the query, so a
     user searching an English/romanized name can see why a Japanese-titled
-    song showed up (e.g. "夜に駆ける (YOASOBI)")."""
-    if not query_lower or query_lower in song.title.lower():
-        return song.title
-    for alias in song.search_acronyms:
-        if query_lower in alias.lower():
-            return f"{song.title} ({alias})"[:100]
-    return song.title
+    song showed up (e.g. "夜に駆ける (YOASOBI)"). JP-only songs get a tag."""
+    label = song.title
+    if query_lower and query_lower not in song.title.lower():
+        for alias in song.search_acronyms:
+            if query_lower in alias.lower():
+                label = f"{song.title} ({alias})"
+                break
+    if song.jp_only:
+        return label[: 100 - len(_JP_ONLY_TAG)] + _JP_ONLY_TAG
+    return label[:100]
+
+
+def _rating_by_grade(constant: float) -> str:
+    """"S: 267-270" lines: the rating a chart of this constant gives at each S-and-above grade."""
+    return "\n".join(
+        f"{r.rank}: {r.low}" + (f"-{r.high}" if r.high != r.low else "") for r in grade_rating_ranges(constant)
+    )
 
 
 def _build_generic_embed(song: Song) -> discord.Embed:
@@ -37,11 +51,15 @@ def _build_generic_embed(song: Song) -> discord.Embed:
         diff_name = sheet.difficulty.display_name if sheet.difficulty else "UTAGE"
         type_name = sheet.type.value.upper() if sheet.type else "?"
         const_str = f" [{sheet.internal_level_value}]" if sheet.internal_level_value else ""
-        lines.append(f"**{diff_name}** [{type_name}] - {sheet.level}{const_str}")
+        jp_tag = " *(JP only)*" if not sheet.intl and not song.jp_only else ""
+        lines.append(f"**{diff_name}** [{type_name}] - {sheet.level}{const_str}{jp_tag}")
 
-    embed = discord.Embed(title=song.title, description=song.artist or "", color=embed_colors.GENERIC)
+    description = "\n".join(p for p in (song.artist, f"**{_NOT_IN_INTL}** (JP only)" if song.jp_only else None) if p)
+    embed = discord.Embed(title=song.title, description=description, color=embed_colors.GENERIC)
     embed.add_field(name="Charts", value="\n".join(lines) or "No chart data", inline=False)
-    embed.add_field(name="Release date", value=f"{song.sheets[0].release_date} - {song.sheets[0].version}" or "Unknown", inline=True)
+    version = next((s.version for s in song.sheets if s.version), None)
+    if version:
+        embed.add_field(name="Version added", value=version, inline=True)
     if song.search_acronyms:
         embed.set_footer(text=f"Aliases: {', '.join(song.search_acronyms)}")
     return embed
@@ -52,10 +70,9 @@ async def _build_detailed_embed(song: Song, difficulty: Difficulty) -> discord.E
     version_sheet = next((s for s in matching_sheets if s.version), None)
     description_lines = [song.artist] if song.artist else []
     if version_sheet:
-        version_line = f"Version: {version_sheet.version}"
-        if version_sheet.release_date:
-            version_line += f" ({version_sheet.release_date})"
-        description_lines.append(version_line)
+        description_lines.append(f"Version: {version_sheet.version}")
+    if matching_sheets and not any(s.intl for s in matching_sheets):
+        description_lines.append(f"**{_NOT_IN_INTL}** (JP only)")
 
     embed = discord.Embed(
         title=f"{song.title} [{difficulty.display_name}]",
@@ -72,6 +89,10 @@ async def _build_detailed_embed(song: Song, difficulty: Difficulty) -> discord.E
     for sheet in matching_sheets:
         type_name = sheet.type.value.upper() if sheet.type else "?"
         lines = [f"Level **{sheet.level}** [{sheet.internal_level_value}]"]
+        if not sheet.intl and any(s.intl for s in matching_sheets):
+            lines.append(f"**{_NOT_IN_INTL}** (JP only)")
+        if sheet.internal_level_value:
+            lines.append(f"Rating by grade:\n{_rating_by_grade(sheet.internal_level_value)}")
         if sheet.note_designer and sheet.note_designer.strip("-").strip():
             # dxdata.json uses a literal "-" placeholder for uncredited charts
             lines.append(f"Charter: {sheet.note_designer}")

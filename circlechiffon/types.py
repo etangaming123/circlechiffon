@@ -48,6 +48,9 @@ class Sheet:
     note_designer: str | None = None
     release_date: str | None = None
     note_counts: NoteCounts | None = None
+    # False = JP-only chart (not on maimai DX NET INTL). Defaults True so data
+    # written before the flag existed, and test fixtures, read as available.
+    intl: bool = True
 
 
 @dataclass(slots=True, kw_only=True)
@@ -60,6 +63,10 @@ class Song:
     image_name: str | None = None
     sheets: list[Sheet] = field(default_factory=list)
     search_acronyms: list[str] = field(default_factory=list)
+
+    @property
+    def jp_only(self) -> bool:
+        return bool(self.sheets) and not any(s.intl for s in self.sheets)
 
 
 class ComboFlag(str, Enum):

@@ -146,10 +146,7 @@ def parse_recent_records(html: str) -> list[RecentScore]:
         title = title_node.text(deep=False, strip=True) if title_node is not None else None
 
         achievement_node = record.css_first(".playlog_achievement_txt")
-        achievement_text = achievement_node.text(strip=True) if achievement_node is not None else None
-        achievement = _parse_achievement(achievement_text)
-        # no score text at all = never played; a played 0% chart still shows "0.0000%"
-        played = bool(achievement_text)
+        achievement = _parse_achievement(achievement_node.text() if achievement_node else None)
 
         score_block_node = record.css_first(".playlog_score_block")
         dx_score, dx_score_total = _parse_dx_score(score_block_node.text() if score_block_node else None)
@@ -210,7 +207,10 @@ def parse_music_records(html: str) -> list[Score]:
         title = title_node.text(strip=True) if title_node is not None else None
 
         achievement_node = record.css_first(".music_score_block.w_112")
-        achievement = _parse_achievement(achievement_node.text() if achievement_node else None)
+        achievement_text = achievement_node.text(strip=True) if achievement_node is not None else None
+        achievement = _parse_achievement(achievement_text)
+        # no score text at all = never played; a played 0% chart still shows "0.0000%"
+        played = bool(achievement_text)
 
         score_block_node = record.css_first(".music_score_block.w_190")
         dx_score, dx_score_total = _parse_dx_score(score_block_node.text() if score_block_node else None)

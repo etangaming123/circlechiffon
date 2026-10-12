@@ -38,21 +38,21 @@ Commands marked 🔗 need a linked SEGA ID account. Everything else works with n
 * 🔗 `/cc-profile` — Your Player's Data image: name, title, rating, rank badges, play counts and the full clear-count grid (`view:Extra` shows class points, miles, missions and tickets instead)
 * 🔗 `/cc-display` — Your nameplate, rendered close to how the real cab displays it
 * 🔗 `/cc-recent` — Page through your recent plays 25 at a time; pick one from the dropdown for a judgement-breakdown image, with a button to show/hide the lost-achievement% per note
-* 🔗 `/cc-best` — Your Best-50 rating image (B15 + B35), styled after dxrating.net's
+* 🔗 `/cc-best` — Your Best-50 rating image (B15 + B35), styled after dxrating.net's; with `tips:True` it also lists which chart constants (and the lowest S grade on them) would beat your B15 / B35 floor
 * 🔗 `/cc-worst` — The opposite of `/cc-best`: your lowest-rated played charts (worst 15 + worst 35, unplayed charts ignored), rendered upside down
 * 🔗 `/cc-album` — Browse your maimai DX NET photo album
 
 ### Scores & Rating
 
 * 🔗 `/cc-scores` — Your score on a song, difficulty by difficulty. Pass `friend:` to see theirs instead
-* `/cc-info` — Look up a song's chart levels, and with a `difficulty`, its full detail: constant, charter, note counts, release version and tags
+* `/cc-info` — Look up a song's chart levels, and with a `difficulty`, its full detail: constant, rating gained at each S-and-above grade, charter, note counts, version added and tags. INTL-first: charts that only exist in the Japanese version are tagged "Not available in INTL"
 * `/cc-rating` — Calculate the rating points a (constant, achievement%) combo earns
 
 ### Social
 
 * 🔗 `/cc-friends` — List your maimai DX NET friends, sorted by rating
 * 🔗 `/cc-friend-profile` — View a friend's profile
-* 🔗 `/cc-friend-best` — Render a friend's best-50 image, computed from their scraped scores
+* 🔗 `/cc-friend-best` — Render a friend's best-50 image, computed from their scraped scores, with average / floor / max ratings (and `tips:True` constant advice)
 * 🔗 `/cc-leaderboard` — Rank you and all your friends on a single chart by achievement
 * 🔗 `/cc-circle` — Your CiRCLE (team) info, points, ranking and members
 * 🔗 `/cc-circle-challenge` — This week's CiRCLE challenge and its progress gauge

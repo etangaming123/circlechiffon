@@ -335,6 +335,11 @@ class ChartCog(commands.Cog):
                 return
 
             embed = _chart_embed(found, song.title, wanted_difficulty)
+            looked_up = next(
+                (sh for sh in song.sheets if sh.type == wanted_type and sh.difficulty == wanted_difficulty), None
+            )
+            if looked_up is not None and not looked_up.intl:
+                embed.add_field(name="Region", value="**Not available in INTL** (JP only)", inline=False)
             if song.image_name:
                 embed.set_thumbnail(url=jacket_url(song.image_name))
 

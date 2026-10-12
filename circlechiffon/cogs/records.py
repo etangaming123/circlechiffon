@@ -12,9 +12,10 @@ from circlechiffon.adapters.dxrating.images import get_jackets_bulk
 from circlechiffon.adapters.maimai_net.badge_icons import get_all_badge_icons
 from circlechiffon.adapters.maimai_site.version_logo import get_version_logo
 from circlechiffon.adapters.maimai_net.errors import MaimaiNetError, SessionExpired
-from circlechiffon.ratingcalc.best50 import calculate_best50
+from circlechiffon.ratingcalc.best50 import calculate_best50, format_stats, summarize
 from circlechiffon.ratingcalc.calculator import calculate_rating, rank_tag_for_achievement
 from circlechiffon.ratingcalc.judgement_loss import calculate_judgement_loss
+from circlechiffon.ratingcalc.tips import format_tips
 from circlechiffon.customisation.store import get_user_template
 from circlechiffon.renderers.b50 import render_b50
 from circlechiffon.renderers.b50_share import build_detail_view_url
@@ -461,14 +462,15 @@ class RecordsCog(commands.Cog):
     @app_commands.command(name="cc-best", description="Render your best-50 maimai DX rating image (B15 + B35, like dxrating.net)")
     @app_commands.describe(
         next_update="Preview your B15 once the current version ages out of the B15 window "
-        "(only current-version charts count toward B15, like after the next update)"
+        "(only current-version charts count toward B15, like after the next update)",
+        tips="Also show which chart constants (and the lowest S grade on them) would raise your rating",
     )
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-    async def best(self, interaction: discord.Interaction, next_update: bool = False):
+    async def best(self, interaction: discord.Interaction, next_update: bool = False, tips: bool = False):
         if not await access.handle_command_access(interaction, interaction.user.id, "cc-best", access.MAIMAI_NET_COOLDOWN):
             return
-        await self._render_own_best(interaction, next_update=next_update)
+        await self._render_own_best(interaction, next_update=next_update, tips=tips)
 
     @app_commands.command(
         name="cc-worst",
@@ -484,7 +486,9 @@ class RecordsCog(commands.Cog):
             return
         await self._render_own_best(interaction, next_update=next_update, worst=True)
 
-    async def _render_own_best(self, interaction: discord.Interaction, *, next_update: bool, worst: bool = False):
+    async def _render_own_best(
+        self, interaction: discord.Interaction, *, next_update: bool, worst: bool = False, tips: bool = False
+    ):
         """Shared body of /cc-best and /cc-worst; access is already checked.
         `worst` swaps in the lowest-rated played charts and flips the image."""
         start_time = time.monotonic()
@@ -497,6 +501,7 @@ class RecordsCog(commands.Cog):
                 interaction, target, "_render_friend_best",
                 extra_note=" `next_update` isn't available in leech mode." if next_update else "",
                 **({"worst": True} if worst else {}),
+                **({"tips": True} if tips else {}),
             )
             return
 
@@ -591,17 +596,14 @@ class RecordsCog(commands.Cog):
                 worst=worst,
             )
 
-            new_entries = [e for e in result.b15 if e is not None]
-            old_entries = [e for e in result.b35 if e is not None]
-            total_count = len(new_entries) + len(old_entries)
-            avg_overall = result.total_rating / total_count if total_count else 0
-            avg_new = result.b15_total / len(new_entries) if new_entries else 0
-            avg_old = result.b35_total / len(old_entries) if old_entries else 0
-            # best: sorted highest-first, so the last entry is the bucket's floor.
-            # worst: sorted lowest-first, so the last entry is its ceiling.
-            edge_new = new_entries[-1].rating if new_entries else None
-            edge_old = old_entries[-1].rating if old_entries else None
-            edge_label = "Ceiling" if worst else "Floor"
+            stats = summarize(result)
+            tips_text = ""
+            if tips and not worst:
+                # a bucket that isn't full has no floor to beat: any play adds rating
+                tips_text = "\n" + format_tips(
+                    stats.edge_new if stats.new_full else None,
+                    stats.edge_old if stats.old_full else None,
+                )
 
             elapsed = time.monotonic() - start_time
             timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
@@ -616,12 +618,11 @@ class RecordsCog(commands.Cog):
                 content=(
                     f"{preview_note}"
                     f"{'Worst-50 total' if worst else 'Total rating'}: **{result.total_rating}** "
-                    f"(New Charts: **{result.b15_total}**, Old Charts: **{result.b35_total}**)\n"
-                    f"Average rating: Overall **{avg_overall:.2f}**, New **{avg_new:.2f}**, Old **{avg_old:.2f}**\n"
-                    f"{edge_label}: New: **{edge_new if edge_new is not None else 'N/A'}**, "
-                    f"Old: **{edge_old if edge_old is not None else 'N/A'}**\n"
+                    f"(Old Charts: **{result.b35_total}**, New Charts: **{result.b15_total}**)\n"
+                    f"{format_stats(stats, worst=worst)}"
                     f"-# Rendered in `{elapsed:.2f}s`"
                     f"{share_note}"
+                    f"{tips_text}"
                 ),
                 attachments=[discord.File(buf, filename=f"{'worst' if worst else 'best'}50-{profile.display_name}-{timestamp}{filename_suffix}.png")],
                 view=B50ShareView(share_url) if share_url else None,
