@@ -47,10 +47,12 @@ def _constant_text(sheet: Sheet) -> str:
     return str(value)
 
 
-def _rating_by_grade(constant: float) -> str:
-    """"S: 267-270" lines: the rating a chart of this constant gives at each S-and-above grade."""
+def _rating_by_grade(constant: float, include_lower: bool = False) -> str:
+    """"S: 267-270" lines: the rating a chart of this constant gives at each S-and-above grade
+    (each grade down to B with `include_lower`)."""
     return "\n".join(
-        f"{r.rank}: {r.low}" + (f"-{r.high}" if r.high != r.low else "") for r in grade_rating_ranges(constant)
+        f"{r.rank}: {r.low}" + (f"-{r.high}" if r.high != r.low else "")
+        for r in grade_rating_ranges(constant, include_lower)
     )
 
 
@@ -313,6 +315,31 @@ class SongsCog(commands.Cog):
             await interaction.edit_original_response(
                 content=f"Couldn't calculate rating: unexpected error ({type(e).__name__}: {e})"
             )
+
+    @app_commands.command(name="cc-cutoffs", description="Show the rating each grade gives for a chart constant")
+    @app_commands.describe(
+        constant="Chart constant (internal level), e.g. 13.9",
+        show_lower_grades="Also show the grades below S (B to AAA). Defaults to false",
+    )
+    @app_commands.allowed_installs(guilds=True, users=True)
+    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+    async def cutoffs(
+        self,
+        interaction: discord.Interaction,
+        constant: float,
+        show_lower_grades: bool = False,
+    ):
+        if not await access.handle_command_access(interaction, interaction.user.id, "cc-cutoffs", access.DEFAULT_COOLDOWN):
+            return
+        if constant < 1 or constant > 15:
+            await interaction.response.send_message("Constant must be between 1 and 15.", ephemeral=True)
+            return
+        embed = discord.Embed(
+            title=f"Rating by grade - constant {constant}",
+            description=_rating_by_grade(constant, show_lower_grades),
+            color=embed_colors.GENERIC,
+        )
+        await interaction.response.send_message(embed=embed)
 
 
 async def setup(bot: commands.Bot):

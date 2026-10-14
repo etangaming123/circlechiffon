@@ -126,3 +126,17 @@ def test_grade_ranges_never_overlap_downward():
         ranges = grade_rating_ranges(tenths / 10)
         flat = [v for r in ranges for v in (r.low, r.high)]
         assert flat == sorted(flat), tenths
+
+
+# 14.0 chart, lower grades: coefficient is flat inside each band except AAA (16.8 -> 17.6 at 96.9999)
+#   B   60.0  9.6  * 14 * 0.60 = 80.64 -> 80    69.9999 9.6  * 14 * 0.699999 = 94.08 -> 94
+#   A   80.0  13.6 * 14 * 0.80 = 152.3 -> 152   89.9999 13.6 * 14 * 0.899999 = 171.36 -> 171
+#   AAA 94.0  16.8 * 14 * 0.94 = 221.08 -> 221  96.9999 17.6 * 14 * 0.969999 = 239.008 -> 239
+def test_grade_rating_ranges_include_lower():
+    from circlechiffon.ratingcalc.calculator import grade_rating_ranges
+
+    got = {r.rank: (r.low, r.high) for r in grade_rating_ranges(14.0, include_lower=True)}
+    assert got["B"] == (80, 94)
+    assert got["A"] == (152, 171)
+    assert got["AAA"] == (221, 239)
+    assert [r.rank for r in grade_rating_ranges(14.0)][0] == "S"

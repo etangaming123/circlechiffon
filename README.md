@@ -47,6 +47,7 @@ Commands marked 🔗 need a linked SEGA ID account. Everything else works with n
 * 🔗 `/cc-scores` — Your score on a song, difficulty by difficulty. Pass `friend:` to see theirs instead
 * `/cc-info` — Look up a song's chart levels, and with a `difficulty`, its full detail: constant, rating gained at each S-and-above grade, charter, note counts, version added and tags. INTL-first: charts that only exist in the Japanese version are tagged "Not available in INTL"
 * `/cc-rating` — Calculate the rating points a (constant, achievement%) combo earns
+* `/cc-cutoffs` — Rating gained at each S-and-above grade for a chart constant (`show_lower_grades` adds B to AAA)
 
 ### Social
 

@@ -109,6 +109,17 @@ S_GRADE_BANDS: list[tuple[str, float, float]] = [
 ]
 
 
+# Same shape for the grades below S (B and up; C/D earn too little to matter).
+LOWER_GRADE_BANDS: list[tuple[str, float, float]] = [
+    ("B", 60.0, 69.9999),
+    ("BB", 70.0, 74.9999),
+    ("BBB", 75.0, 79.9999),
+    ("A", 80.0, 89.9999),
+    ("AA", 90.0, 93.9999),
+    ("AAA", 94.0, 96.9999),
+]
+
+
 @dataclass(slots=True, frozen=True)
 class GradeRange:
     rank: str
@@ -116,14 +127,16 @@ class GradeRange:
     high: int  # rating at its highest achievement
 
 
-def grade_rating_ranges(internal_level: float) -> list[GradeRange]:
+def grade_rating_ranges(internal_level: float, include_lower: bool = False) -> list[GradeRange]:
     """Rating gained by a chart of this constant at each S-and-above grade, as
-    the (min, max) over the grade's achievement band. Excludes the AP bonus."""
+    the (min, max) over the grade's achievement band. Excludes the AP bonus.
+    `include_lower` prepends the B..AAA grades."""
+    bands = (LOWER_GRADE_BANDS if include_lower else []) + S_GRADE_BANDS
     return [
         GradeRange(
             rank=rank,
             low=calculate_rating(internal_level, low_ach).rating,
             high=calculate_rating(internal_level, high_ach).rating,
         )
-        for rank, low_ach, high_ach in S_GRADE_BANDS
+        for rank, low_ach, high_ach in bands
     ]
