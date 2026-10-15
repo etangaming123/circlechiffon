@@ -346,7 +346,7 @@ def _leaderboard_embed(
 
     footer = f"Page {page + 1}/{page_count} - {len(rows)} score(s)"
     if no_data_count:
-        footer += f" - {no_data_count} friend(s) haven't played this difficulty"
+        footer += f" - {no_data_count} friend(s) haven't played this chart"
     if failed_count:
         footer += f" - {failed_count} friend(s) couldn't be fetched"
     embed.set_footer(text=footer)
@@ -354,20 +354,13 @@ def _leaderboard_embed(
 
 
 class LeaderboardView(discord.ui.View):
-    """Pages through one chart's leaderboard, and switches difficulty via
-    < / >. Difficulty switching re-fetches every friend (one request each)
-    and caches the result per difficulty - pre-fetching all five up front
-    would be ~5x the friend count in requests for four difficulties nobody
-    may look at."""
+    """Pages through one chart's leaderboard."""
 
     def __init__(
         self,
         invoker_id: int,
         song: Song,
-        difficulties: list[Difficulty],
-        index: int,
-        own_name: str,
-        entries: list[FriendEntry],
+        difficulty: Difficulty,
         rows: list[LeaderboardRow],
         no_data_count: int,
         failed_count: int,
@@ -376,37 +369,29 @@ class LeaderboardView(discord.ui.View):
         super().__init__(timeout=60)
         self.invoker_id = invoker_id
         self.song = song
-        self.difficulties = difficulties
-        self.index = index
-        self.own_name = own_name
-        self.entries = entries
+        self.difficulty = difficulty
+        self.rows = rows
+        self.no_data_count = no_data_count
+        self.failed_count = failed_count
         self.show_chart_type = show_chart_type
         self.page = 0
         self.message: discord.InteractionMessage | None = None
-        self._cache: dict[Difficulty, tuple[list[LeaderboardRow], int, int]] = {
-            difficulties[index]: (rows, no_data_count, failed_count)
-        }
         self._update_buttons()
 
-    @property
-    def difficulty(self) -> Difficulty:
-        return self.difficulties[self.index]
-
-    def _current(self) -> tuple[list[LeaderboardRow], int, int]:
-        return self._cache[self.difficulty]
-
     def _update_buttons(self):
-        rows, _, _ = self._current()
-        page_count = max(1, (len(rows) + _PAGE_SIZE - 1) // _PAGE_SIZE)
+        page_count = max(1, (len(self.rows) + _PAGE_SIZE - 1) // _PAGE_SIZE)
         self.previous_page.disabled = self.page == 0
         self.next_page.disabled = self.page >= page_count - 1
-        self.easier.disabled = self.index == 0
-        self.harder.disabled = self.index == len(self.difficulties) - 1
 
     def embed(self) -> discord.Embed:
-        rows, no_data_count, failed_count = self._current()
         return _leaderboard_embed(
-            self.song, self.difficulty, rows, self.page, no_data_count, failed_count, self.show_chart_type
+            self.song,
+            self.difficulty,
+            self.rows,
+            self.page,
+            self.no_data_count,
+            self.failed_count,
+            self.show_chart_type,
         )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -428,49 +413,6 @@ class LeaderboardView(discord.ui.View):
         self.page += 1
         self._update_buttons()
         await interaction.response.edit_message(embed=self.embed(), view=self)
-
-    @discord.ui.button(label="< Difficulty", style=discord.ButtonStyle.primary)
-    async def easier(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._switch(interaction, self.index - 1)
-
-    @discord.ui.button(label="Difficulty >", style=discord.ButtonStyle.primary)
-    async def harder(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._switch(interaction, self.index + 1)
-
-    async def _switch(self, interaction: discord.Interaction, new_index: int):
-        difficulty = self.difficulties[new_index]
-        if difficulty in self._cache:
-            self.index = new_index
-            self.page = 0
-            self._update_buttons()
-            await interaction.response.edit_message(embed=self.embed(), view=self)
-            return
-
-        for item in self.children:
-            item.disabled = True
-        await interaction.response.edit_message(
-            content=f"Fetching {difficulty.display_name} scores for {len(self.entries)} friend(s)...",
-            embed=None,
-            view=self,
-        )
-        try:
-            rows, no_data_count, failed_count = await _fetch_leaderboard(
-                interaction.user.id, self.song, difficulty, self.entries, self.own_name
-            )
-        except Exception as e:
-            self._update_buttons()
-            await interaction.edit_original_response(
-                content=f"Couldn't fetch {difficulty.display_name} scores: {type(e).__name__}: {e}",
-                embed=self.embed(),
-                view=self,
-            )
-            return
-
-        self._cache[difficulty] = (rows, no_data_count, failed_count)
-        self.index = new_index
-        self.page = 0
-        self._update_buttons()
-        await interaction.edit_original_response(content=None, embed=self.embed(), view=self)
 
     async def on_timeout(self):
         for item in self.children:
@@ -504,8 +446,16 @@ async def _fetch_leaderboard(
     own_scores, scores_by_idx, failed = await accounts.with_client(discord_id, fetch)
 
     friend_scores = [(e.profile.display_name, scores_by_idx.get(e.idx, [])) for e in entries]
-    no_data_count = sum(1 for _, scores in friend_scores if not scores)
     rows = _leaderboard_rows(song, difficulty, own_name, own_scores, friend_scores)
+    # friends fetched fine but with no score on *this chart*. `scores` holds
+    # every song at the difficulty, so an empty list isn't the right test;
+    # failed fetches are absent from scores_by_idx and reported separately.
+    no_data_count = sum(
+        1
+        for e in entries
+        if e.idx in scores_by_idx
+        and not any(s.title == song.title and s.achievement > 0 for s in scores_by_idx[e.idx])
+    )
     return rows, no_data_count, failed
 
 
@@ -936,10 +886,7 @@ class FriendsCog(commands.Cog):
             view = LeaderboardView(
                 invoker_id=interaction.user.id,
                 song=song,
-                difficulties=available,
-                index=available.index(chosen),
-                own_name=own_name,
-                entries=entries,
+                difficulty=chosen,
                 rows=rows,
                 no_data_count=no_data_count,
                 failed_count=failed_count,
