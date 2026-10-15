@@ -9,7 +9,7 @@ Bucket sizing follows gekichumai/dxrating's calculateBest50
 window for B15 eligibility is this bot's own definition, not dxrating's.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from circlechiffon.ratingcalc.calculator import calculate_rating
 from circlechiffon.songdata.catalog import SongCatalog
@@ -48,7 +48,8 @@ def calculate_best50(
     # set below still gets bucketed into older_entries (B35) as usual,
     # rather than being dropped, matching the real "ages out" mechanic. It
     # can't predict actual unreleased charts: JP-only charts have no INTL score
-    # to bucket.
+    # to bucket. It does apply JP's already-announced constant changes
+    # (Sheet.jp_internal_level_value) to INTL charts.
     if next_update_preview:
         new_versions = {v for v in (catalog.current_version,) if v is not None}
     else:
@@ -69,6 +70,13 @@ def calculate_best50(
         sheet = catalog.find_sheet(score.title, score.chart_type, score.difficulty)
         if sheet is None or sheet.internal_level_value is None:
             continue
+        if next_update_preview and sheet.intl and sheet.jp_internal_level_value is not None:
+            # JP already moved this chart's constant; INTL most likely follows
+            sheet = replace(
+                sheet,
+                internal_level_value=sheet.jp_internal_level_value,
+                level=sheet.jp_level or sheet.level,
+            )
         award = calculate_rating(sheet.internal_level_value, score.achievement, score.combo_flag)
         entry = RatedEntry(score=score, sheet=sheet, rating=award.rating, rank=award.rank)
         if sheet.version in new_versions:

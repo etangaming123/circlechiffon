@@ -138,13 +138,10 @@ def _build_detail_embed(score: RecentScore, judgements: Judgements | None, has_j
     return embed
 
 
-async def _fetch_recent_with_details(client) -> tuple[list[RecentScore], dict[str, Judgements]]:
-    """One get_recent_scores() call, then eagerly fetch every track's
-    judgment-count/DX-score detail up front (rather than on-demand per
-    click) so a single-track focus never needs an extra fetch - bounded
-    only by the client's own internal rate limiter (client.py's
-    AsyncLimiter), same as any other batch of calls through it."""
-    scores = await client.get_recent_scores()
+async def _fetch_details(client, scores: list[RecentScore]) -> dict[str, Judgements]:
+    """Judgment-count/DX-score detail for just these plays - bounded only by
+    the client's own internal rate limiter (client.py's AsyncLimiter). A play
+    whose detail page doesn't parse is simply left out of the result."""
     details_by_idx: dict[str, Judgements] = {}
 
     async def fetch_detail(score: RecentScore):
@@ -152,13 +149,24 @@ async def _fetch_recent_with_details(client) -> tuple[list[RecentScore], dict[st
             return
         try:
             judgements = await client.get_recent_score_detail(score.idx)
+        except SessionExpired:
+            raise
         except Exception:
             return
         if judgements is not None:
             details_by_idx[score.idx] = judgements
 
     await asyncio.gather(*(fetch_detail(s) for s in scores))
-    return scores, details_by_idx
+    return details_by_idx
+
+
+async def _fetch_recent_first_credit(client) -> tuple[list[RecentScore], dict[str, Judgements]]:
+    """One get_recent_scores() call plus the detail of the newest credit only,
+    so the initial /cc-recent is fast; every other play's detail is fetched
+    when its credit or track is opened (RecentScoresView.ensure_details)."""
+    scores = await client.get_recent_scores()
+    groups = _group_by_credit(scores)
+    return scores, await _fetch_details(client, groups[0] if groups else [])
 
 
 async def _build_credit_pages(
@@ -258,6 +266,7 @@ class RecentScoresView(discord.ui.View):
         dropdown_pages: list[list[RecentScore]],
         details_by_idx: dict[str, Judgements],
         jacket_by_title: dict[str, bytes],
+        attempted_details: set[str] | None = None,
     ):
         super().__init__(timeout=30)
         self.invoker_id = invoker_id
@@ -265,6 +274,9 @@ class RecentScoresView(discord.ui.View):
         self.dropdown_pages = dropdown_pages
         self.details_by_idx = details_by_idx
         self.jacket_by_title = jacket_by_title
+        # idx of every play whose detail fetch already ran (hit or miss), so
+        # a play with no parseable detail isn't re-fetched on every click
+        self.attempted_details: set[str] = set(attempted_details or ()) | set(details_by_idx)
         self.credit_index = 0
         self.dropdown_index = 0
         self.viewing_detail = False
@@ -316,6 +328,34 @@ class RecentScoresView(discord.ui.View):
         else:
             await self._render_page(interaction)
 
+    async def ensure_details(self, interaction: discord.Interaction, scores: list[RecentScore]) -> bool:
+        """Fetch the detail of any of `scores` not fetched yet, acknowledging
+        the interaction first (a fetch can outlast Discord's 3s window).
+        False = the fetch failed and the user has been told."""
+        missing = [s for s in scores if s.idx and s.idx not in self.attempted_details]
+        if not missing:
+            return True
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        try:
+            fetched = await accounts.with_client(self.invoker_id, lambda client: _fetch_details(client, missing))
+        except accounts.NotLinked:
+            await interaction.followup.send("You haven't linked a maimai DX NET account anymore.", ephemeral=True)
+            return False
+        except MaimaiNetError as e:
+            await interaction.followup.send(f"Couldn't fetch play detail: {e}", ephemeral=True)
+            return False
+        self.details_by_idx.update(fetched)
+        self.attempted_details.update(s.idx for s in missing)
+        return True
+
+    @staticmethod
+    async def _edit(interaction: discord.Interaction, **kwargs):
+        if interaction.response.is_done():
+            await interaction.edit_original_response(**kwargs)
+        else:
+            await interaction.response.edit_message(**kwargs)
+
     def current_embeds_and_files(self) -> tuple[list[discord.Embed], list[discord.File]]:
         embeds, files = [], []
         for i, (_score, embed, jacket) in enumerate(self.pages[self.credit_index]):
@@ -329,10 +369,20 @@ class RecentScoresView(discord.ui.View):
         self.selected_score = None
         self._update_buttons()
         embeds, files = self.current_embeds_and_files()
-        await interaction.response.edit_message(content=None, embeds=embeds, view=self, attachments=files)
+        await self._edit(interaction, content=None, embeds=embeds, view=self, attachments=files)
+
+    async def _go_to_credit(self, interaction: discord.Interaction, index: int):
+        # the credit's plays get their detail fetched as it comes on screen
+        if not await self.ensure_details(interaction, [t[0] for t in self.pages[index]]):
+            return
+        self.credit_index = index
+        await self._render_page(interaction)
 
     async def on_track_selected(self, interaction: discord.Interaction, block_local_index: int):
-        self.selected_score = self.dropdown_pages[self.dropdown_index][block_local_index]
+        score = self.dropdown_pages[self.dropdown_index][block_local_index]
+        if not await self.ensure_details(interaction, [score]):
+            return
+        self.selected_score = score
         self.viewing_detail = True
         self._update_buttons()
         await self._render_current_detail(interaction)
@@ -359,7 +409,7 @@ class RecentScoresView(discord.ui.View):
             files.append(discord.File(io.BytesIO(jacket), filename="jacket_detail.jpg"))
 
         embed = _build_detail_embed(score, judgements, jacket is not None)
-        await interaction.response.edit_message(content=None, embeds=[embed], view=self, attachments=files)
+        await self._edit(interaction, content=None, embeds=[embed], view=self, attachments=files)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.invoker_id:
@@ -371,13 +421,11 @@ class RecentScoresView(discord.ui.View):
 
     @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary, row=0)
     async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.credit_index -= 1
-        await self._render_page(interaction)
+        await self._go_to_credit(interaction, self.credit_index - 1)
 
     @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary, row=0)
     async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.credit_index += 1
-        await self._render_page(interaction)
+        await self._go_to_credit(interaction, self.credit_index + 1)
 
     @discord.ui.button(label="Back", style=discord.ButtonStyle.secondary, row=0)
     async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -429,7 +477,7 @@ class RecordsCog(commands.Cog):
             # if the session had expired and the user opted into
             # remember_password on /cc-login.
             scores, details_by_idx = await accounts.with_client(
-                interaction.user.id, _fetch_recent_with_details, on_retry=accounts.default_retry_notice(interaction)
+                interaction.user.id, _fetch_recent_first_credit, on_retry=accounts.default_retry_notice(interaction)
             )
 
             if not scores:
@@ -462,7 +510,7 @@ class RecordsCog(commands.Cog):
     @app_commands.command(name="cc-best", description="Render your best-50 maimai DX rating image (B15 + B35, like dxrating.net)")
     @app_commands.describe(
         next_update="Preview your B15 once the current version ages out of the B15 window "
-        "(only current-version charts count toward B15, like after the next update)",
+        "(only current-version charts count toward B15) and apply JP's upcoming chart constant changes",
         tips="Also show which chart constants (and the lowest S grade on them) would raise your rating",
     )
     @app_commands.allowed_installs(guilds=True, users=True)
@@ -608,7 +656,7 @@ class RecordsCog(commands.Cog):
             elapsed = time.monotonic() - start_time
             timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
             preview_note = (
-                f"-# Preview: simulates next update (B15 = {catalog.current_version} only)\n" if next_update else ""
+                f"-# Preview: simulates next update (B15 = {catalog.current_version} only, upcoming constant changes applied)\n" if next_update else ""
             )
             filename_suffix = "-preview" if next_update else ""
             share_note = (

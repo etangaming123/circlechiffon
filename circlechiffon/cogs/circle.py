@@ -13,10 +13,10 @@ from circlechiffon.types import Circle, CircleChallenge, CircleMember
 _PAGE_SIZE = 10
 
 
-def _profile_embed(circle: Circle) -> discord.Embed:
+def _profile_embed(circle: Circle, show_code: bool = False) -> discord.Embed:
     embed = discord.Embed(title=circle.name, color=embed_colors.INFO)
-    embed.add_field(name="Code", value=circle.code or "?", inline=True)
-    embed.add_field(name="Leader", value=circle.leader_name or "?", inline=True)
+    if show_code:
+        embed.add_field(name="Code", value=circle.code or "?", inline=True)
     if circle.points_this_month is not None:
         embed.add_field(name="Points (this month)", value=f"{circle.points_this_month:,} PT", inline=True)
     if circle.rank_this_month is not None:
@@ -48,10 +48,11 @@ def _members_embed(circle: Circle, members: list[CircleMember], page: int, page_
 
 
 class CircleMembersView(discord.ui.View):
-    def __init__(self, invoker_id: int, circle: Circle, members: list[CircleMember]):
+    def __init__(self, invoker_id: int, circle: Circle, members: list[CircleMember], show_code: bool = False):
         super().__init__(timeout=30)
         self.invoker_id = invoker_id
         self.circle = circle
+        self.show_code = show_code
         self.members = members
         self.page = 0
         self.page_count = max(1, (len(members) + _PAGE_SIZE - 1) // _PAGE_SIZE)
@@ -63,7 +64,7 @@ class CircleMembersView(discord.ui.View):
         self.next.disabled = self.page >= self.page_count - 1
 
     def embeds(self) -> list[discord.Embed]:
-        return [_profile_embed(self.circle), _members_embed(self.circle, self.members, self.page, self.page_count)]
+        return [_profile_embed(self.circle, self.show_code), _members_embed(self.circle, self.members, self.page, self.page_count)]
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.invoker_id:
@@ -130,7 +131,8 @@ class CircleCog(commands.Cog):
     @app_commands.command(name="cc-circle", description="View your maimai DX Circle (team) info, points, ranking, and members")
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-    async def circle(self, interaction: discord.Interaction):
+    @app_commands.describe(show_code="Show the Circle join code in the embed (default: false)")
+    async def circle(self, interaction: discord.Interaction, show_code: bool = False):
         if not await access.handle_command_access(interaction, interaction.user.id, "cc-circle", access.MAIMAI_NET_COOLDOWN):
             return
         await interaction.response.defer()
@@ -153,7 +155,7 @@ class CircleCog(commands.Cog):
                 )
                 return
 
-            view = CircleMembersView(interaction.user.id, circle, members)
+            view = CircleMembersView(interaction.user.id, circle, members, show_code)
             message = await interaction.edit_original_response(content=None, embeds=view.embeds(), view=view)
             view.message = message
         except accounts.NotLinked:

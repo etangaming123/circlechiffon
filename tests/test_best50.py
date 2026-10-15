@@ -233,3 +233,19 @@ def test_format_stats_labels(fake_catalog):
     assert "Floor: Old: **N/A**, New: **280**" in best and "Max: Old: **N/A**, New: **280**" in best
     worst = format_stats(stats, worst=True)
     assert "Ceiling:" in worst and "Min:" in worst
+
+
+def test_next_update_preview_applies_upcoming_constant_change(fake_catalog):
+    fake_catalog.add("moving", version="NEW", level=13.4)
+    sheet = fake_catalog._sheets[("moving", ChartType.dx, Difficulty.master)]
+    sheet.jp_internal_level_value = 13.8
+    scores = [score("moving", achievement=100.0)]
+
+    now = calculate_best50(scores, fake_catalog)
+    preview = calculate_best50(scores, fake_catalog, next_update_preview=True)
+
+    assert now.b15[0].sheet.internal_level_value == 13.4
+    assert preview.b15[0].sheet.internal_level_value == 13.8
+    assert preview.total_rating == calculate_rating(13.8, 100.0).rating
+    assert preview.total_rating > now.total_rating
+    assert sheet.internal_level_value == 13.4  # catalog sheet untouched
