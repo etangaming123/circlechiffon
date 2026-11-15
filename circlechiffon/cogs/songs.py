@@ -8,7 +8,7 @@ from circlechiffon.adapters.dxrating.tags import get_tags_client
 from circlechiffon.adapters.maimai_net.errors import MaimaiNetError, SessionExpired
 from circlechiffon.ratingcalc.calculator import calculate_rating, grade_rating_ranges
 from circlechiffon.songdata.catalog import get_catalog
-from circlechiffon.types import ComboFlag, Difficulty, Sheet, Song
+from circlechiffon.types import ChartType, ComboFlag, Difficulty, Sheet, Song
 
 _DIFFICULTY_CHOICES = [
     app_commands.Choice(name="BASIC", value="basic"),
@@ -18,6 +18,11 @@ _DIFFICULTY_CHOICES = [
     app_commands.Choice(name="Re:MASTER", value="remaster"),
 ]
 
+
+_CHART_TYPE_CHOICES = [
+    app_commands.Choice(name="DX", value=ChartType.dx.value),
+    app_commands.Choice(name="Standard", value=ChartType.std.value),
+]
 
 _JP_ONLY_TAG = " [JP only]"
 _NOT_IN_INTL = "Not available in INTL"
@@ -56,9 +61,11 @@ def _rating_by_grade(constant: float, include_lower: bool = False) -> str:
     )
 
 
-def _build_generic_embed(song: Song) -> discord.Embed:
+def _build_generic_embed(song: Song, chart_type: ChartType | None = None) -> discord.Embed:
     lines = []
     for sheet in song.sheets:
+        if chart_type is not None and sheet.type != chart_type:
+            continue
         diff_name = sheet.difficulty.display_name if sheet.difficulty else "UTAGE"
         type_name = sheet.type.value.upper() if sheet.type else "?"
         const_str = f" [{_constant_text(sheet)}]" if sheet.internal_level_value else ""
@@ -67,7 +74,8 @@ def _build_generic_embed(song: Song) -> discord.Embed:
 
     description = "\n".join(p for p in (song.artist, f"**{_NOT_IN_INTL}** (JP only)" if song.jp_only else None) if p)
     embed = discord.Embed(title=song.title, description=description, color=embed_colors.GENERIC)
-    embed.add_field(name="Charts", value="\n".join(lines) or "No chart data", inline=False)
+    empty = f"No {chart_type.value.upper()} charts for this song." if chart_type else "No chart data"
+    embed.add_field(name="Charts", value="\n".join(lines) or empty, inline=False)
     version = next((s.version for s in song.sheets if s.version), None)
     if version:
         embed.add_field(name="Version added", value=version, inline=True)
@@ -76,8 +84,12 @@ def _build_generic_embed(song: Song) -> discord.Embed:
     return embed
 
 
-async def _build_detailed_embed(song: Song, difficulty: Difficulty) -> discord.Embed:
-    matching_sheets = [s for s in song.sheets if s.difficulty == difficulty]
+async def _build_detailed_embed(
+    song: Song, difficulty: Difficulty, chart_type: ChartType | None = None
+) -> discord.Embed:
+    matching_sheets = [
+        s for s in song.sheets if s.difficulty == difficulty and (chart_type is None or s.type == chart_type)
+    ]
     version_sheet = next((s for s in matching_sheets if s.version), None)
     description_lines = [song.artist] if song.artist else []
     if version_sheet:
@@ -144,9 +156,10 @@ class CheckScoreView(discord.ui.View):
     that embed needs to stay intact for other people to use the same
     button independently."""
 
-    def __init__(self, song: Song):
+    def __init__(self, song: Song, chart_type: ChartType | None = None):
         super().__init__(timeout=30)
         self.song = song
+        self.chart_type = chart_type
         self.message: discord.Message | discord.InteractionMessage | None = None
 
     @discord.ui.button(label="Check my score", style=discord.ButtonStyle.primary, emoji="🎯")
@@ -160,7 +173,7 @@ class CheckScoreView(discord.ui.View):
         invoker_id = interaction.user.id
         try:
             view = await build_score_view(
-                invoker_id, self.song, on_retry=accounts.default_retry_notice(interaction)
+                invoker_id, self.song, chart_type=self.chart_type, on_retry=accounts.default_retry_notice(interaction)
             )
         except accounts.NotLinked:
             await interaction.edit_original_response(
@@ -209,8 +222,9 @@ class SongsCog(commands.Cog):
     @app_commands.describe(
         title="Song title (or part of it, including English/romanized aliases) to search for",
         difficulty="Show full detail (version, charter, note counts, dxrating.net tags) for this difficulty",
+        chart="Only show the DX or Standard chart (default: both)",
     )
-    @app_commands.choices(difficulty=_DIFFICULTY_CHOICES)
+    @app_commands.choices(difficulty=_DIFFICULTY_CHOICES, chart=_CHART_TYPE_CHOICES)
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def song(
@@ -218,6 +232,7 @@ class SongsCog(commands.Cog):
         interaction: discord.Interaction,
         title: str,
         difficulty: app_commands.Choice[str] | None = None,
+        chart: app_commands.Choice[str] | None = None,
     ):
         if not await access.handle_command_access(interaction, interaction.user.id, "cc-info", access.DEFAULT_COOLDOWN):
             return
@@ -232,11 +247,12 @@ class SongsCog(commands.Cog):
                 return
 
             song = results[0]
+            chart_type = ChartType(chart.value) if chart else None
 
             if difficulty is None:
-                embed = _build_generic_embed(song)
+                embed = _build_generic_embed(song, chart_type)
             else:
-                embed = await _build_detailed_embed(song, Difficulty(difficulty.value))
+                embed = await _build_detailed_embed(song, Difficulty(difficulty.value), chart_type)
 
             # dxrating's jacket CDN is a public, cacheable asset host (unlike
             # maimaidx-eng.com's per-account images) - link it directly
@@ -244,7 +260,7 @@ class SongsCog(commands.Cog):
             if song.image_name:
                 embed.set_thumbnail(url=jacket_url(song.image_name))
 
-            view = CheckScoreView(song)
+            view = CheckScoreView(song, chart_type)
             view.message = await interaction.edit_original_response(content=None, embed=embed, view=view)
         except Exception as e:
             await interaction.edit_original_response(

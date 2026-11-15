@@ -24,7 +24,7 @@ from circlechiffon.customisation.store import get_user_template
 from circlechiffon.renderers.b50 import render_b50
 from circlechiffon.renderers.profile import render_friend_profile
 from circlechiffon.songdata.catalog import get_catalog
-from circlechiffon.types import Difficulty, FriendEntry, Score, Song
+from circlechiffon.types import ChartType, Difficulty, FriendEntry, Score, Song
 
 _PAGE_SIZE = 10
 
@@ -253,9 +253,10 @@ class ConfirmHeavyView(discord.ui.View):
         self.stop()
 
 
-def _heavy_warning(song: Song, difficulty: Difficulty) -> str:
+def _heavy_warning(song: Song, difficulty: Difficulty, chart_type: ChartType | None = None) -> str:
+    type_label = f" {chart_type.value.upper()}" if chart_type else ""
     return (
-        f"About to fetch friend scores for {song.title} [{difficulty.display_name}]..."
+        f"About to fetch friend scores for {song.title} [{difficulty.display_name}{type_label}]..."
         "Hold up! This command is a heavy command. It will take quite a bit, and it fetches a bunch of data. If you'd like to proceed, please confirm below."
         f"\n-# Cooldown is {access.MAIMAI_NET_HEAVY_COOLDOWN}s after clicking the button. If you cancel, the cooldown will not be activated."
     )
@@ -274,6 +275,7 @@ def _leaderboard_rows(
     own_name: str,
     own_scores: list[Score],
     friend_scores: list[tuple[str, list[Score]]],
+    chart_type: ChartType | None = None,
 ) -> list[LeaderboardRow]:
     """Flattens everyone's scores down to the one chart, drops players with
     no score on it, and ranks by achievement descending.
@@ -293,6 +295,7 @@ def _leaderboard_rows(
             LeaderboardRow(player_name=name, score=s, is_self=is_self)
             for s in scores
             if s.title == song.title and s.difficulty == difficulty and s.achievement > 0
+            and (chart_type is None or s.chart_type == chart_type)
         ]
 
     rows = rows_for(own_name, own_scores, True)
@@ -310,6 +313,7 @@ def _leaderboard_embed(
     no_data_count: int,
     failed_count: int,
     show_chart_type: bool,
+    chart_type: ChartType | None = None,
 ) -> discord.Embed:
     page_count = max(1, (len(rows) + _PAGE_SIZE - 1) // _PAGE_SIZE)
     page = max(0, min(page, page_count - 1))
@@ -321,7 +325,8 @@ def _leaderboard_embed(
         if rows
         else embed_colors.difficulty_color(difficulty)
     )
-    embed = discord.Embed(title=f"{song.title} [{difficulty.display_name}]", color=color)
+    type_label = f" {chart_type.value.upper()}" if chart_type else ""
+    embed = discord.Embed(title=f"{song.title} [{difficulty.display_name}{type_label}]", color=color)
     # linked, not attached - same reasoning as score.py: the pager rebuilds a
     # fresh embed on every click and a linked CDN jacket survives that,
     # whereas an attachment would need re-uploading each time.
@@ -366,8 +371,10 @@ class LeaderboardView(discord.ui.View):
         no_data_count: int,
         failed_count: int,
         show_chart_type: bool,
+        chart_type: ChartType | None = None,
     ):
         super().__init__(timeout=60)
+        self.chart_type = chart_type
         self.invoker_id = invoker_id
         self.song = song
         self.difficulty = difficulty
@@ -393,6 +400,7 @@ class LeaderboardView(discord.ui.View):
             self.no_data_count,
             self.failed_count,
             self.show_chart_type,
+            self.chart_type,
         )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -432,6 +440,7 @@ async def _fetch_leaderboard(
     entries: list[FriendEntry],
     own_name: str,
     on_progress=None,
+    chart_type: ChartType | None = None,
 ) -> tuple[list[LeaderboardRow], int, int]:
     """One difficulty's worth of leaderboard: your own scores plus every
     friend's, narrowed to a single difficulty so this costs 1 + N requests
@@ -456,7 +465,7 @@ async def _fetch_leaderboard(
     own_scores, scores_by_idx, failed = await accounts.with_client(discord_id, fetch)
 
     friend_scores = [(e.profile.display_name, scores_by_idx.get(e.idx, [])) for e in entries]
-    rows = _leaderboard_rows(song, difficulty, own_name, own_scores, friend_scores)
+    rows = _leaderboard_rows(song, difficulty, own_name, own_scores, friend_scores, chart_type)
     # friends fetched fine but with no score on *this chart*. `scores` holds
     # every song at the difficulty, so an empty list isn't the right test;
     # failed fetches are absent from scores_by_idx and reported separately.
@@ -464,7 +473,10 @@ async def _fetch_leaderboard(
         1
         for e in entries
         if e.idx in scores_by_idx
-        and not any(s.title == song.title and s.achievement > 0 for s in scores_by_idx[e.idx])
+        and not any(
+            s.title == song.title and s.achievement > 0 and (chart_type is None or s.chart_type == chart_type)
+            for s in scores_by_idx[e.idx]
+        )
     )
     return rows, no_data_count, failed
 
@@ -810,11 +822,16 @@ class FriendsCog(commands.Cog):
     @app_commands.describe(
         title="Song title (or part of it, including aliases) to search for",
         difficulty="Which difficulty to rank (default: MASTER)",
+        chart="DX or Standard chart, for songs that have both (default: DX)",
     )
     @app_commands.choices(
         difficulty=[
             app_commands.Choice(name=d.display_name, value=d.value) for d in _LEADERBOARD_DIFFICULTIES
-        ]
+        ],
+        chart=[
+            app_commands.Choice(name="DX", value=ChartType.dx.value),
+            app_commands.Choice(name="Standard", value=ChartType.std.value),
+        ],
     )
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
@@ -823,6 +840,7 @@ class FriendsCog(commands.Cog):
         interaction: discord.Interaction,
         title: str,
         difficulty: app_commands.Choice[str] | None = None,
+        chart: app_commands.Choice[str] | None = None,
     ):
         # Costs 1 + N requests where N is the friend count - by far the
         # heaviest command here, hence its own cooldown tier and the
@@ -843,9 +861,15 @@ class FriendsCog(commands.Cog):
                 return
             song = results[0]
 
+            types_present = {s.type for s in song.sheets if s.type in (ChartType.dx, ChartType.std)}
+            wanted = ChartType(chart.value) if chart else ChartType.dx
+            chart_type = wanted if wanted in types_present else (
+                ChartType.dx if ChartType.dx in types_present else ChartType.std
+            )
+
             available = [
                 d for d in _LEADERBOARD_DIFFICULTIES
-                if any(s.difficulty == d for s in song.sheets)
+                if any(s.difficulty == d and s.type == chart_type for s in song.sheets)
             ]
             if not available:
                 access.clear_cooldown(interaction.user.id, "cc-leaderboard")
@@ -857,14 +881,19 @@ class FriendsCog(commands.Cog):
             chosen = Difficulty(difficulty.value) if difficulty is not None else Difficulty.master
             if chosen not in available:
                 chosen = available[-1]
-            # a song with both a DX and a STD sheet contributes two rows per
-            # player; only label the type when that's actually possible.
-            show_chart_type = len({s.type for s in song.sheets if s.difficulty in available}) > 1
+            # rows are narrowed to one chart type, so the per-row type label
+            # is redundant; the type is shown in the heading instead.
+            show_chart_type = False
+            type_note = (
+                f"No {wanted.value.upper()} chart for this song - ranking {chart_type.value.upper()} instead.\n"
+                if chart_type != wanted
+                else ""
+            )
 
             # Everything above is local (catalog lookup only) - nothing has
             # touched maimai DX NET yet, which is the point of asking here.
             confirm = ConfirmHeavyView(interaction.user.id)
-            await interaction.edit_original_response(content=_heavy_warning(song, chosen), view=confirm)
+            await interaction.edit_original_response(content=type_note + _heavy_warning(song, chosen, chart_type), view=confirm)
             timed_out = await confirm.wait()
             if timed_out or not confirm.confirmed:
                 access.clear_cooldown(interaction.user.id, "cc-leaderboard")
@@ -890,7 +919,7 @@ class FriendsCog(commands.Cog):
                 await interaction.edit_original_response(content=f"Fetching friend scores... {done}/{total}")
 
             rows, no_data_count, failed_count = await _fetch_leaderboard(
-                interaction.user.id, song, chosen, entries, own_name, on_progress=report
+                interaction.user.id, song, chosen, entries, own_name, on_progress=report, chart_type=chart_type
             )
 
             view = LeaderboardView(
@@ -901,6 +930,7 @@ class FriendsCog(commands.Cog):
                 no_data_count=no_data_count,
                 failed_count=failed_count,
                 show_chart_type=show_chart_type,
+                chart_type=chart_type if len(types_present) > 1 else None,
             )
             elapsed = time.monotonic() - start_time
             message = await interaction.edit_original_response(
