@@ -4,6 +4,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from circlechiffon import access, badge_emojis
+from circlechiffon.adapters.maimai_net.client import close_shared_transport
 from config import config
 from circlechiffon.cogs import COG_LIST
 from circlechiffon.database import engine as db_engine
@@ -32,6 +33,14 @@ class CircleChiffon(commands.Bot):
                 print(f"Failed to load cog {item}: {e}")
 
         await badge_emojis.load(self)
+
+    async def close(self):
+        # discord.py routes Ctrl+C here too (bot.run's runner exits through
+        # `async with self`), so this is the one shutdown path to hook.
+        try:
+            await super().close()
+        finally:
+            await close_shared_transport()
 
 
 bot = CircleChiffon(command_prefix="!", intents=intents)

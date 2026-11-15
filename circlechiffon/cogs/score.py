@@ -7,6 +7,7 @@ from discord.ext import commands
 from circlechiffon import access, accounts, badge_emojis, embed_colors, leech
 from circlechiffon.adapters.dxrating.images import jacket_url
 from circlechiffon.adapters.maimai_net.errors import MaimaiNetError, SessionExpired
+from circlechiffon.adapters.maimai_net.urls import GENRE_IDS
 from circlechiffon.ratingcalc.calculator import rank_tag_for_achievement
 from circlechiffon.songdata.catalog import get_catalog
 from circlechiffon.types import ChartType, Difficulty, FriendEntry, Score, Song, SongPlayStats
@@ -236,17 +237,17 @@ async def build_score_view(
             scores = await client.get_friend_scores(friend.idx, on_progress=on_progress)
             return scores, {}, friend.profile.display_name
 
-        scores = await client.get_music_scores()
-        # any one of this song's score rows of the resolved chart type
-        # carries an idx that reaches the same musicDetail page - it covers
-        # every difficulty of that same chart type at once (DX and STD are
-        # separate idx values/pages with independent data, so this is
-        # already scoped to the one type this view is showing).
-        idx = next(
-            (s.idx for s in scores if s.title == song.title and s.idx and s.chart_type == resolved_type),
-            None,
-        )
-        play_stats = await client.get_song_play_stats(idx) if idx is not None else {}
+        # Two requests: the song's genre page (for its musicDetail idx) and
+        # musicDetail itself, which carries both the full score and the play
+        # count of every played difficulty of this chart type (DX and STD
+        # are separate pages). Only if musicDetail can't be fetched at all
+        # does this fall back to the listing pages, without play counts.
+        genre = GENRE_IDS.get(song.category)
+        detail = await client.get_song_detail(song.title, resolved_type, genre)
+        if detail is not None:
+            scores, play_stats = detail
+        else:
+            scores, play_stats = await client.get_music_scores(genre=genre, include_utage=False), {}
         # normally free - login records the name - but an account whose login
         # couldn't read its profile has none stored, so recover it once here.
         name = await accounts.get_display_name(invoker_id)

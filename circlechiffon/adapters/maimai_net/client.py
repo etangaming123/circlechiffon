@@ -1,6 +1,10 @@
 import asyncio
+import hashlib
 import http.cookiejar
 import json
+import os
+from pathlib import Path
+from urllib.parse import quote, urlsplit
 from typing import Awaitable, Callable
 
 import httpx
@@ -30,10 +34,12 @@ from circlechiffon.adapters.maimai_net.parser import (
     parse_equipped_collection_image,
     parse_equipped_collection_item,
     parse_error_page,
+    find_music_idx,
     parse_friend_detail,
     parse_friend_list,
     parse_friend_list_page_count,
     parse_friend_scores,
+    parse_music_detail_scores,
     parse_music_records,
     parse_photos,
     parse_profile,
@@ -43,6 +49,7 @@ from circlechiffon.adapters.maimai_net.parser import (
     parse_song_play_stats,
 )
 from circlechiffon.types import (
+    ChartType,
     Circle,
     CircleChallenge,
     CircleMember,
@@ -100,6 +107,90 @@ _TRANSIENT_RETRY_DELAYS = (1.0, 2.0)
 _MAX_REFRESH_REDIRECTS = 6
 
 
+class _SharedTransport(httpx.AsyncBaseTransport):
+    """One keep-alive connection pool for every MaimaiNetClient.
+
+    A client is built per command (accounts.with_client) and used to open
+    fresh TCP+TLS connections each time - measured ~0.9-1.3s per request on
+    a new client vs ~0.2s on a warm one. Cookies live on each AsyncClient,
+    never on the transport, so accounts can't see each other's session.
+
+    aclose() is a no-op because AsyncClient.aclose() calls it on every
+    command; the pool is only torn down by close_shared_transport() at bot
+    shutdown (main.py's CircleChiffon.close, which Ctrl+C reaches too)."""
+
+    def __init__(self):
+        self._inner: httpx.AsyncHTTPTransport | None = None
+
+    def _transport(self) -> httpx.AsyncHTTPTransport:
+        if self._inner is None:
+            self._inner = httpx.AsyncHTTPTransport(
+                limits=httpx.Limits(max_connections=50, max_keepalive_connections=20, keepalive_expiry=30.0),
+                # connect failures only (httpcore never retries a sent request)
+                retries=1,
+            )
+        return self._inner
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        return await self._transport().handle_async_request(request)
+
+    async def aclose(self) -> None:
+        pass
+
+
+_SHARED_TRANSPORT = _SharedTransport()
+
+
+async def close_shared_transport() -> None:
+    """Close the pooled DX NET connections. Safe to call more than once."""
+    inner, _SHARED_TRANSPORT._inner = _SHARED_TRANSPORT._inner, None
+    if inner is not None:
+        await inner.aclose()
+
+
+# DX NET artwork (icons, plates, frames, Chara, badges) is served without a
+# session cookie and named by content hash (img/Icon/84b923fa041a1354.png),
+# or as a static asset (rating_base_rainbow.png?ver=1.65) - confirmed live.
+# So it is cached on disk by full URL. Album photos (img/photo/user/...) are
+# per-account captures, never cached.
+_IMG_CACHE_DIR = Path(__file__).resolve().parents[3] / "data" / "dxnet_img_cache"
+_IMG_CACHE_MAX_FILES = 4000
+_IMG_CACHE_LOCK = asyncio.Lock()
+
+
+def _img_cache_path(url: str) -> Path | None:
+    parts = urlsplit(url)
+    if parts.hostname != "maimaidx-eng.com" or not parts.path.startswith("/maimai-mobile/img/"):
+        return None
+    if "/photo/" in parts.path or not parts.path.lower().endswith(".png"):
+        return None
+    return _IMG_CACHE_DIR / f"{hashlib.sha256(url.encode()).hexdigest()[:32]}.png"
+
+
+def _read_cached(path: Path) -> bytes | None:
+    try:
+        data = path.read_bytes()
+        os.utime(path)  # recency for the prune below
+        return data
+    except OSError:
+        return None
+
+
+def _write_cached(path: Path, data: bytes) -> None:
+    try:
+        _IMG_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_bytes(data)
+        os.replace(tmp, path)
+        files = list(_IMG_CACHE_DIR.glob("*.png"))
+        if len(files) > _IMG_CACHE_MAX_FILES:
+            files.sort(key=lambda f: f.stat().st_mtime)
+            for f in files[: len(files) - _IMG_CACHE_MAX_FILES]:
+                f.unlink(missing_ok=True)
+    except OSError:
+        pass  # a cache that can't write is just a cache miss next time
+
+
 class MaimaiNetClient:
     def __init__(self, cookies: list[dict] | None = None):
         initial_jar = httpx.Cookies()
@@ -140,6 +231,7 @@ class MaimaiNetClient:
             cookies=initial_jar,
             follow_redirects=False,
             timeout=15.0,
+            transport=_SHARED_TRANSPORT,
         )
         # Single-flight guard for refresh_session(). Several methods fan out
         # concurrent _get_page calls over this one jar (get_music_scores
@@ -565,17 +657,27 @@ class MaimaiNetClient:
         return parse_profile_extras(html)
 
     async def get_image_bytes(self, url: str) -> bytes | None:
-        """Fetches an arbitrary image through this account's own
-        authenticated session - needed for per-account assets (profile
-        icon, dan/class-rank badges) that aren't on a public CDN, unlike
-        dxrating jackets. Returns None on any failure rather than raising,
-        so a renderer can fall back to a placeholder."""
+        """Fetches a DX NET image (profile icon, dan/class-rank badges,
+        plates, album photos) through this client. Returns None on any
+        failure rather than raising,
+        so a renderer can fall back to a placeholder.
+
+        Artwork is disk-cached (see _img_cache_path), so a repeat render
+        costs no request at all."""
+        cache_path = _img_cache_path(url)
+        if cache_path is not None:
+            cached = await asyncio.to_thread(_read_cached, cache_path)
+            if cached is not None:
+                return cached
         try:
             resp = await self._get(url)
         except httpx.HTTPError:
             return None
-        if resp.status_code != 200:
+        if resp.status_code != 200 or not resp.headers.get("content-type", "").startswith("image/"):
             return None
+        if cache_path is not None:
+            async with _IMG_CACHE_LOCK:
+                await asyncio.to_thread(_write_cached, cache_path, resp.content)
         return resp.content
 
     async def get_equipped_nameplate_url(self) -> str | None:
@@ -682,6 +784,8 @@ class MaimaiNetClient:
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         include_utage: bool = True,
         difficulties: list[Difficulty] | None = None,
+        genre: int | None = None,
+        played_only: bool = True,
     ) -> list[Score]:
         """Fetch every difficulty's score list (BASIC..Re:MASTER, plus UTAGE
         unless `include_utage=False` - UTAGE charts don't count toward
@@ -696,7 +800,13 @@ class MaimaiNetClient:
         `difficulties` narrows the fetch to just those difficulties (one
         request each) for callers that only care about a single chart -
         it can't select UTAGE, which has no Difficulty member, so it
-        implies `include_utage=False`."""
+        implies `include_utage=False`.
+
+        `played_only` (default) fetches through musicSort's played-only
+        filter (see urls.RECORD_SORT_PAGE) - every caller only ever looks at
+        played rows, and it cuts the download about 5x. Pass False to get
+        every row, played or not (e.g. to check a title exists at all).
+        `genre` (a urls.GENRE_IDS value) narrows every request to one genre."""
         if difficulties is not None:
             wanted = {DIFFICULTY_TO_DIFF_VALUE[d] for d in difficulties}
             diff_values = [v for v in urls.MUSIC_RECORD_DIFF_VALUES if v in wanted]
@@ -706,8 +816,7 @@ class MaimaiNetClient:
             ]
 
         async def fetch(diff_value: int) -> list[Score]:
-            url = f"{urls.INTL['RECORD_MUSICS_PAGE']}?genre=99&diff={diff_value}"
-            html = await self._get_page(url)
+            html = await self._get_page(urls.music_record_url(diff_value, genre, played_only))
             return parse_music_records(html)
 
         tasks = [asyncio.create_task(fetch(v)) for v in diff_values]
@@ -750,19 +859,56 @@ class MaimaiNetClient:
         unredundant fetch, so one unlucky hiccup here has no other request to
         fall back on - a second full attempt (fresh _get_page call, ladder
         and all) is cheap insurance against exactly that."""
+        html = await self._get_music_detail_html(idx)
+        return parse_song_play_stats(html) if html is not None else {}
+
+    async def _get_music_detail_html(self, idx: str) -> str | None:
+        """musicDetail with one full retry (see get_song_play_stats). None if
+        both attempts fail on anything but SessionExpired/MaintenanceError."""
         for attempt in range(2):
             try:
-                html = await self._get_page(f"{urls.INTL['MUSIC_DETAIL_PAGE']}?idx={idx}")
+                return await self._get_page(f"{urls.INTL['MUSIC_DETAIL_PAGE']}?idx={quote(idx, safe='')}")
             except (SessionExpired, MaintenanceError):
                 raise
             except MaimaiNetError as e:
                 if attempt == 0:
                     continue
-                print(f"get_song_play_stats(idx={idx}) swallowed: {type(e).__name__}: {e}")
-                return {}
-            else:
-                return parse_song_play_stats(html)
-        return {}
+                print(f"musicDetail(idx={idx[:16]}...) swallowed: {type(e).__name__}: {e}")
+        return None
+
+    async def get_utage_scores(self) -> list[Score]:
+        """Every UTAGE row (one musicGenre page, ~90 rows). Kept on musicGenre:
+        musicSort mislabels UTAGE rows (see urls.RECORD_SORT_PAGE)."""
+        return parse_music_records(await self._get_page(urls.music_record_url(urls.UTAGE_DIFF_VALUE)))
+
+    async def get_song_detail(
+        self, title: str, chart_type: ChartType, genre: int | None = None
+    ) -> tuple[list[Score], dict[Difficulty, SongPlayStats]] | None:
+        """One song's own scores *and* play stats for one chart type, in two
+        requests instead of a full six-difficulty listing: the song's genre
+        page at BASIC (every chart has a BASIC row, played or not, and it
+        carries the musicDetail idx for its chart type), then musicDetail,
+        which holds the full score of every played difficulty as well as
+        the play count. Both come off the same musicDetail response, so the
+        play count can't go missing while the score shows.
+
+        Falls back to the all-genre page when the title isn't in `genre`
+        (catalog genre and DX NET genre disagreeing). Returns ([], {}) when
+        the title has no row of that chart type at all, and None when
+        musicDetail itself couldn't be fetched - the caller then falls back
+        to the listing pages for the score."""
+        idx = None
+        for g in ([genre] if genre else []) + [None]:
+            html = await self._get_page(urls.music_record_url(0, g, played_only=False))
+            idx = find_music_idx(html, title, chart_type)
+            if idx is not None:
+                break
+        if idx is None:
+            return [], {}
+        detail = await self._get_music_detail_html(idx)
+        if detail is None:
+            return None
+        return parse_music_detail_scores(detail, title), parse_song_play_stats(detail)
 
     async def get_friend_list(self) -> list[FriendEntry]:
         """Confirmed live: /friend/ lists every friend as a profile-card row
@@ -809,6 +955,7 @@ class MaimaiNetClient:
         idx: str,
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         difficulties: list[Difficulty] | None = None,
+        genre: int | None = None,
     ) -> list[Score]:
         """Fetch a friend's achievement/combo/sync per difficulty (confirmed
         live against /friend/friendGenreVs/battleStart/ - BASIC..Re:MASTER,
@@ -827,7 +974,8 @@ class MaimaiNetClient:
         `difficulties` narrows the fetch to just those difficulties. One
         chart's leaderboard across every friend only needs one difficulty
         each, so this is what keeps that fan-out at 1 request per friend
-        instead of 5."""
+        instead of 5. `genre` (a urls.GENRE_IDS value) narrows each page to
+        one genre - several times smaller than the all-genre page."""
         diff_labels = {v: urls.MUSIC_RECORD_DIFF_LABELS[v] for v in urls.FRIEND_SCORE_DIFF_VALUES}
         if difficulties is not None:
             wanted = {DIFFICULTY_TO_DIFF_VALUE[d] for d in difficulties}
@@ -837,8 +985,7 @@ class MaimaiNetClient:
 
         async def fetch(diff_value: int) -> list[Score]:
             difficulty = DIFF_VALUE_TO_DIFFICULTY[diff_value]
-            url = f"{urls.INTL['FRIEND_SCORE_PAGE']}&diff={diff_value}&idx={idx}"
-            html = await self._get_page(url)
+            html = await self._get_page(urls.friend_score_url(idx, diff_value, genre))
             return parse_friend_scores(html, difficulty)
 
         tasks = [asyncio.create_task(fetch(v)) for v in diff_values]
@@ -861,6 +1008,7 @@ class MaimaiNetClient:
         entries: list[FriendEntry],
         difficulty: Difficulty,
         on_progress: Callable[[int, int], Awaitable[None]] | None = None,
+        genre: int | None = None,
     ) -> tuple[dict[str, list[Score]], int]:
         """Fetch every friend's scores at one difficulty - the fan-out behind
         a single chart's leaderboard. Takes an already-fetched friend list
@@ -880,7 +1028,9 @@ class MaimaiNetClient:
 
         `on_progress` is called as (done, total) while friends land - a
         different shape from the per-difficulty-label callback the other
-        score fetches take, since here the unit of progress is a friend."""
+        score fetches take, since here the unit of progress is a friend.
+
+        `genre` narrows every friend's page to the chart's genre."""
         if not entries:
             return {}, 0
 
@@ -891,7 +1041,7 @@ class MaimaiNetClient:
             nonlocal done
             async with semaphore:
                 try:
-                    return await self.get_friend_scores(entry.idx, difficulties=[difficulty])
+                    return await self.get_friend_scores(entry.idx, difficulties=[difficulty], genre=genre)
                 finally:
                     done += 1
                     if on_progress is not None:
@@ -926,7 +1076,7 @@ class MaimaiNetClient:
         SessionExpired/MaintenanceError still propagate normally since those
         are meaningful regardless of this endpoint's uncertainty."""
         try:
-            html = await self._get_page(f"{urls.INTL['RECORD_DETAIL_PAGE']}?idx={idx}")
+            html = await self._get_page(f"{urls.INTL['RECORD_DETAIL_PAGE']}?idx={quote(idx, safe='')}")
         except (SessionExpired, MaintenanceError):
             raise
         except MaimaiNetError:

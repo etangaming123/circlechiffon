@@ -1,19 +1,20 @@
 """
-dxrating.net song aliases API client. `GET https://miruku.dxrating.net/api/v1/aliases`
-is public/unauthenticated (confirmed live this session, same host as the
-tags API) and returns every alias as {song_id, name} pairs. song_id here
-uses the same literal title-string scheme dxdata.json's own "songId" field
-uses (confirmed live: e.g. "raputa" appears as an alias song_id here, and
-dxdata.json songId values are likewise literal titles), so no
-id-translation layer is needed - a straight dict join on the string.
+Song aliases from dxrating.net, keyed by the bot's `songId`.
 
-Fetched once, synchronously, at catalog-load time - catalog loading itself
-is eager/synchronous at startup (songdata/catalog.py), and this is a
-one-time call, so it isn't worth threading async through the whole loader
-for it.
+First choice is data/dxrating_extras.json (extras.py), which update_dxdata.py
+fills from the aliases bundled in the v1 dxdata document - no request at
+catalog load. Fallback, when that file doesn't exist yet: the standalone
+`GET https://miruku.dxrating.net/api/v1/aliases`, public/unauthenticated,
+whose `song_id` is still the legacy title-string id dxdata.json's `songId`
+uses (confirmed live: "raputa", "with U"), so it joins straight on songId.
+
+Called synchronously at catalog-load time (songdata/catalog.py loads eagerly
+at startup), so the fallback is a plain blocking call.
 """
 
 import httpx
+
+from circlechiffon.adapters.dxrating import extras
 
 ALIASES_API_URL = "https://miruku.dxrating.net/api/v1/aliases"
 
@@ -22,6 +23,10 @@ def fetch_aliases_by_song_id() -> dict[str, list[str]]:
     """Returns {song_id: [alias, ...]}. Returns an empty dict on any
     failure (network error, bad response) - aliases are enrichment only,
     never worth failing catalog load/bot startup over."""
+    bundled = (extras.load() or {}).get("aliases")
+    if isinstance(bundled, dict):
+        return bundled
+
     try:
         resp = httpx.get(ALIASES_API_URL, timeout=10.0)
         resp.raise_for_status()

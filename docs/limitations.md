@@ -90,9 +90,11 @@ than failing.
 
 ## dxrating.net connectivity
 
-The dxrating.net tags API (`miruku.dxrating.net`) and jacket CDN (`shama.dxrating.net`) may be
-unreachable from some hosts. Everything downstream degrades gracefully — no tags shown, a solid
-placeholder square instead of jacket art — rather than failing the command. If you see that fallback,
+The dxrating.net API (`miruku.dxrating.net`: song catalog, tags, aliases, DX NET status) and jacket
+CDN (`shama.dxrating.net`) may be unreachable from some hosts. Everything downstream degrades
+gracefully — the last downloaded catalog, tags and aliases are kept, the maintenance pre-check
+assumes DX NET is up, and a solid placeholder square replaces jacket art — rather than failing the
+command. If you see that fallback,
 check connectivity to those two hosts before assuming a bug.
 
 ## Database upgrades

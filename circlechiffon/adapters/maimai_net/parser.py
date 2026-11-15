@@ -199,10 +199,15 @@ def parse_recent_records(html: str) -> list[RecentScore]:
 
 
 def parse_music_records(html: str) -> list[Score]:
+    """Own-score listing rows. Two layouts, both confirmed live: musicGenre
+    wraps each row in an outer `w_450 m_15 p_r f_0` div (which can hold the
+    chart-type icon outside the form, so the wrapper is the row there);
+    musicSort's rows are a single `music_<diff>_score_back ... w_450 m_15 p_3
+    f_0` div. Genre's inner div has no w_450, so no row matches twice."""
     tree = LexborHTMLParser(html)
     results: list[Score] = []
 
-    for record in tree.css(".w_450.m_15.p_r.f_0"):
+    for record in tree.css(".w_450.m_15.p_r.f_0, .w_450.m_15.p_3.f_0"):
         title_node = record.css_first(".music_name_block")
         title = title_node.text(strip=True) if title_node is not None else None
 
@@ -326,6 +331,58 @@ def parse_song_play_stats(html: str) -> dict[Difficulty, SongPlayStats]:
         if entry.play_count is not None or entry.last_played is not None:
             stats[difficulty] = entry
     return stats
+
+
+def parse_music_detail_scores(html: str, title: str) -> list[Score]:
+    """The full own score of every *played* difficulty on a musicDetail page
+    - the same page parse_song_play_stats reads, so one fetch gives both.
+    Confirmed live against a real account: only played difficulties get a
+    `div#<difficulty>` block (an unplayed one is simply absent), each holding
+    the chart-type icon, achievement in `.music_score_block.w_120`, "a / b"
+    DX score in `.music_score_block.w_310` and the combo then sync icon as
+    `img.h_45` (music_icon_back.png when there is none). `title` is the one
+    the caller matched the listing row on, so it compares equal to the
+    catalog's; the page's own title block isn't needed."""
+    tree = LexborHTMLParser(html)
+    results: list[Score] = []
+    for difficulty in Difficulty:
+        block = tree.css_first(f"#{difficulty.value}")
+        if block is None:
+            continue
+        achievement_node = block.css_first(".music_score_block.w_120")
+        achievement_text = achievement_node.text(strip=True) if achievement_node is not None else None
+        if not achievement_text:
+            continue
+        type_icon = block.css_first(".music_kind_icon")
+        chart_type, _ = _classify_type_and_difficulty(type_icon.attributes.get("src") if type_icon else None, None)
+        dx_node = block.css_first(".music_score_block.w_310")
+        dx_match = _FRACTION_RE.search(dx_node.text()) if dx_node is not None else None
+        dx_score = dx_score_total = None
+        if dx_match:
+            dx_score, dx_score_total = (int(g.replace(",", "")) for g in dx_match.groups())
+        combo_flag, sync_flag = _extract_combo_flag(block, "img.h_45")
+        results.append(
+            Score(
+                title=title,
+                difficulty=difficulty,
+                chart_type=chart_type,
+                achievement=_parse_achievement(achievement_text),
+                dx_score=dx_score,
+                dx_score_total=dx_score_total,
+                combo_flag=combo_flag,
+                sync_flag=sync_flag,
+            )
+        )
+    return results
+
+
+def find_music_idx(html: str, title: str, chart_type: ChartType) -> str | None:
+    """The musicDetail idx of `title`'s `chart_type` row on a listing page,
+    played or not (every row carries one, confirmed live)."""
+    for score in parse_music_records(html):
+        if score.title == title and score.chart_type == chart_type and score.idx:
+            return score.idx
+    return None
 
 
 _PLAY_COUNT_RE = re.compile(r"play count of current version[：:]\s*([\d,]+)")

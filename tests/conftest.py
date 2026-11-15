@@ -6,7 +6,8 @@ Three guards so a test run can never touch live state:
   on a fresh checkout, calls input() waiting for a bot token) the moment it's
   imported - nothing under test should depend on it.
 * dxrating.net is never contacted: SongCatalog() fetches aliases over HTTP on
-  construction, so that fetch is replaced with an empty result.
+  construction, so that fetch is replaced with an empty result, and the
+  maimai NET status check accounts.with_client() makes says "not down".
 * Fake catalog helpers below let best-50 tests run without data/dxdata.json.
 """
 
@@ -28,6 +29,11 @@ sys.modules["config"] = _stub_config
 @pytest.fixture(autouse=True)
 def no_network(monkeypatch):
     monkeypatch.setattr("circlechiffon.songdata.catalog.fetch_aliases_by_song_id", lambda: {})
+
+    async def not_down() -> bool:
+        return False
+
+    monkeypatch.setattr("circlechiffon.adapters.dxrating.status.intl_under_maintenance", not_down)
 
 
 class FakeCatalog:

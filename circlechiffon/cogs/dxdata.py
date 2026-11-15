@@ -7,11 +7,15 @@ from circlechiffon.adapters.maimai_site import version_logo
 from circlechiffon.songdata.catalog import get_catalog, reload_catalog
 from config import config
 
-CHECK_EVERY_HOURS = 12
+# Hourly: the download is revalidated with its ETag, so a check that finds nothing
+# new is a bodiless 304, and tags/aliases (which ride in the same document) stay
+# about as fresh as the old hourly /tags fetch kept them.
+CHECK_EVERY_HOURS = 1
 
 
 class DxdataCog(commands.Cog):
-    """Keeps data/dxdata.json (constants, versions, new songs) current without a restart."""
+    """Keeps data/dxdata.json (constants, versions, new songs) and data/dxrating_extras.json
+    (aliases, tags) current without a restart."""
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot

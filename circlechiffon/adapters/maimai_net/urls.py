@@ -13,6 +13,14 @@ INTL = {
     "PHOTO_PAGE": "https://maimaidx-eng.com/maimai-mobile/playerData/photo/",
     "RECORD_RECENT_PAGE": "https://maimaidx-eng.com/maimai-mobile/record",
     "RECORD_MUSICS_PAGE": "https://maimaidx-eng.com/maimai-mobile/record/musicGenre/search/",
+    # confirmed live: same row markup as musicGenre (minus its outer wrapper
+    # div), and `playCheck=on` drops every chart you have never played -
+    # 5.7 MB -> 1.15 MB across BASIC..Re:MASTER on a real account, played
+    # counts identical per difficulty. `search=A` is every song, `G-<genre>`
+    # one genre (GENRE_IDS). NOT usable for UTAGE: diff=10 rows come back as
+    # "diff_.png" + music_standard.png with no UTAGE label, so UTAGE stays on
+    # musicGenre.
+    "RECORD_SORT_PAGE": "https://maimaidx-eng.com/maimai-mobile/record/musicSort/search/",
     "RECORD_DETAIL_PAGE": "https://maimaidx-eng.com/maimai-mobile/record/playlogDetail/",
     "MUSIC_DETAIL_PAGE": "https://maimaidx-eng.com/maimai-mobile/record/musicDetail/",
     "CIRCLE_PAGE": "https://maimaidx-eng.com/maimai-mobile/circle/",
@@ -30,10 +38,41 @@ INTL = {
     "FRIEND_DETAIL_PAGE": "https://maimaidx-eng.com/maimai-mobile/friend/friendDetail/",
     # confirmed live: scoreType=2 is the achievement view (scoreType=1 shows
     # a DX-star icon instead but never the raw DX score number - not useful
-    # here); genre=99 is "All genre" in one page; diff is appended by caller
-    # from FRIEND_SCORE_DIFF_VALUES.
-    "FRIEND_SCORE_PAGE": "https://maimaidx-eng.com/maimai-mobile/friend/friendGenreVs/battleStart/?scoreType=2&genre=99",
+    # here); genre (99 = "All genre", or one of GENRE_IDS) and diff (from
+    # FRIEND_SCORE_DIFF_VALUES) are appended by the caller. One genre is a
+    # fraction of the 2.5 MB all-genre MASTER page (303 KB for 東方Project).
+    # Its `playCheck=on` is NOT usable: it keeps only charts *both* players
+    # have played, dropping the friend's other plays.
+    "FRIEND_SCORE_PAGE": "https://maimaidx-eng.com/maimai-mobile/friend/friendGenreVs/battleStart/?scoreType=2",
 }
+
+ALL_GENRES = 99
+
+# Song catalog `category` (dxdata's JP genre names) -> DX NET's genre id, as
+# listed in record/musicGenre/'s <select> (confirmed live). UTAGE's
+# "宴会場" has no genre page of its own and is deliberately absent.
+GENRE_IDS = {
+    "POPS＆アニメ": 101,
+    "niconico＆ボーカロイド": 102,
+    "東方Project": 103,
+    "ゲーム＆バラエティ": 104,
+    "maimai": 105,
+    "オンゲキ＆CHUNITHM": 106,
+}
+
+
+def music_record_url(diff_value: int, genre: int | None = None, played_only: bool = True) -> str:
+    """One difficulty's own-score listing. Played-only goes through musicSort
+    (far smaller), except UTAGE, which musicSort mislabels (see
+    RECORD_SORT_PAGE)."""
+    if played_only and diff_value != UTAGE_DIFF_VALUE:
+        search = f"G-{genre}" if genre else "A"
+        return f"{INTL['RECORD_SORT_PAGE']}?search={search}&sort=1&playCheck=on&diff={diff_value}"
+    return f"{INTL['RECORD_MUSICS_PAGE']}?genre={genre or ALL_GENRES}&diff={diff_value}"
+
+
+def friend_score_url(idx: str, diff_value: int, genre: int | None = None) -> str:
+    return f"{INTL['FRIEND_SCORE_PAGE']}&genre={genre or ALL_GENRES}&diff={diff_value}&idx={idx}"
 
 IMG_BASE = "https://maimaidx-eng.com/maimai-mobile/img/"
 

@@ -12,7 +12,8 @@ from sqlalchemy import delete
 
 import crypto_utils
 from circlechiffon.adapters.maimai_net.client import MaimaiNetClient
-from circlechiffon.adapters.maimai_net.errors import MaimaiNetError, SessionExpired
+from circlechiffon.adapters.dxrating import status as dxnet_status
+from circlechiffon.adapters.maimai_net.errors import MaintenanceError, MaimaiNetError, SessionExpired
 from circlechiffon import session_queue
 from circlechiffon.database import engine as db_engine
 from circlechiffon.database.models import Account, CollectionPreset, LeechLink
@@ -136,7 +137,14 @@ async def with_client(
     """Queue behind any other operation on this SEGA ID (one in flight per
     account - see session_queue), then run `_with_client`. The owner of the
     account (`is_owner`, the default) skips ahead of waiting leechers but never
-    interrupts the running operation; leech.with_host_client passes False."""
+    interrupts the running operation; leech.with_host_client passes False.
+
+    Raises MaintenanceError up front when dxrating.net's status check reports
+    DX NET (INTL) under maintenance - before queueing or touching the account.
+    That check fails open (see adapters/dxrating/status.py), and the page-level
+    maintenance detection still applies when it can't tell."""
+    if await dxnet_status.intl_under_maintenance():
+        raise MaintenanceError("maimai DX NET is currently under maintenance.")
     async with session_queue.slot(discord_id, is_owner):
         return await _with_client(discord_id, operation, on_retry)
 

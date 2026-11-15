@@ -6,9 +6,13 @@ The vendored song/chart catalog (`data/dxdata.json`, trimmed from the full datas
 formula (`circlechiffon/ratingcalc/calculator.py`), the B15/B35 best-50 bucketing logic
 (`circlechiffon/ratingcalc/best50.py`), and the chart tag/jacket APIs
 (`circlechiffon/adapters/dxrating/`) are all ported or sourced from
-[gekichumai/dxrating](https://github.com/gekichumai/dxrating) — dxdata itself,
-`packages/maimai-domain`'s rating math, dxrating's public `/api/v1/tags` endpoint, and its
-`shama.dxrating.net` jacket CDN, respectively.
+[gekichumai/dxrating](https://github.com/gekichumai/dxrating) — dxdata itself (now synced from
+dxrating's v1 catalog API, `miruku.dxrating.net/api/v1/dxdata`, together with its community aliases
+and tags), `packages/maimai-domain`'s rating math, and its `shama.dxrating.net` jacket CDN,
+respectively. Data from DXRating (dxrating.net).
+
+DX NET maintenance status is read from dxrating's public
+`/api/v1/io/import/maimai-net/status` endpoint.
 
 The `/cc-best` image (`circlechiffon/renderers/b50.py`) is a from-scratch Pillow reimplementation of
 the visual design of dxrating's own best-50 "oneshot" image — which itself runs a server-side

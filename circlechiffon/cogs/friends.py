@@ -16,6 +16,7 @@ from circlechiffon.adapters.dxrating.images import get_jackets_bulk, jacket_url
 from circlechiffon.adapters.maimai_net.badge_icons import get_all_badge_icons
 from circlechiffon.adapters.maimai_site.version_logo import get_version_logo
 from circlechiffon.adapters.maimai_net.errors import MaimaiNetError, SessionExpired
+from circlechiffon.adapters.maimai_net.urls import GENRE_IDS
 from circlechiffon.ratingcalc.best50 import calculate_best50, format_stats, summarize
 from circlechiffon.ratingcalc.calculator import rank_tag_for_achievement
 from circlechiffon.ratingcalc.tips import format_tips
@@ -437,9 +438,18 @@ async def _fetch_leaderboard(
     rather than 6 + 5N."""
 
     async def fetch(client):
-        own_scores = await client.get_music_scores(difficulties=[difficulty])
+        # Every page is narrowed to the song's genre (several times smaller
+        # than all-genre). Your own page is fetched with unplayed rows on
+        # purpose: the title being listed proves the catalog genre matches
+        # DX NET's, whether or not you've played it - if it isn't, everyone
+        # falls back to all genres rather than silently coming back empty.
+        genre = GENRE_IDS.get(song.category)
+        own_scores = await client.get_music_scores(difficulties=[difficulty], genre=genre, played_only=False)
+        if genre is not None and not any(s.title == song.title for s in own_scores):
+            genre = None
+            own_scores = await client.get_music_scores(difficulties=[difficulty])
         scores_by_idx, failed = await client.get_friends_chart_scores(
-            entries, difficulty, on_progress=on_progress
+            entries, difficulty, on_progress=on_progress, genre=genre
         )
         return own_scores, scores_by_idx, failed
 

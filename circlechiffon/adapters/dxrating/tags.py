@@ -9,15 +9,18 @@ exact (song_id, sheet_type, sheet_difficulty) triple in tagSongs - there is
 no song-level fallback on dxrating's side, so a chart with no difficulty
 selected just gets no tags shown (matches dxrating's own frontend behavior).
 
-The backend itself caches this response for 30 minutes; we mirror that with
-our own client-side cache (matching dxrating's frontend SWR window) so we
-don't hammer their API on every /cc-info call.
+Source, in order: data/dxrating_extras.json (extras.py - the tag catalog
+bundled in the v1 dxdata document, already keyed by `songId`, refreshed by
+the dxdata sync), re-read whenever that file changes; else this endpoint,
+re-checked hourly with If-None-Match so an unchanged catalog is a 304.
 """
 
 import time
 from dataclasses import dataclass
 
 import httpx
+
+from circlechiffon.adapters.dxrating import extras
 
 TAGS_API_URL = "https://miruku.dxrating.net/api/v1/tags"
 CACHE_TTL_SECONDS = 60 * 60  # 1 hour
@@ -37,13 +40,36 @@ class DxRatingTagsClient:
         self._tag_groups: list[dict] = []
         self._tag_songs: list[dict] = []
         self._fetched_at: float = 0.0
+        self._etag: str | None = None
+        self._extras_mtime: float | None = None
+        self._from_extras = False
+
+    def _set(self, data: dict) -> None:
+        self._tags = data.get("tags", [])
+        self._tag_groups = data.get("tagGroups", [])
+        self._tag_songs = data.get("tagSongs", [])
 
     async def _ensure_fresh(self) -> None:
+        mtime = extras.mtime()
+        if mtime is not None and mtime != self._extras_mtime:
+            self._extras_mtime = mtime
+            bundled = extras.load()
+            self._from_extras = bundled is not None and "tagSongs" in bundled
+            if self._from_extras:
+                self._set(bundled)
+                return
+        if self._from_extras:
+            return
+
         if self._tag_songs and (time.monotonic() - self._fetched_at) < CACHE_TTL_SECONDS:
             return
+        headers = {"If-None-Match": self._etag} if self._etag and self._tag_songs else {}
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.get(TAGS_API_URL)
+                resp = await client.get(TAGS_API_URL, headers=headers)
+                if resp.status_code == 304:
+                    self._fetched_at = time.monotonic()
+                    return
                 resp.raise_for_status()
                 data = resp.json()
         except (httpx.HTTPError, ValueError):
@@ -51,9 +77,8 @@ class DxRatingTagsClient:
             # have - tags are enrichment, never worth failing a command over
             return
 
-        self._tags = data.get("tags", [])
-        self._tag_groups = data.get("tagGroups", [])
-        self._tag_songs = data.get("tagSongs", [])
+        self._set(data)
+        self._etag = resp.headers.get("etag")
         self._fetched_at = time.monotonic()
 
     async def find_tags(self, song_id: str, sheet_type: str, sheet_difficulty: str) -> list[Tag]:
