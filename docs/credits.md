@@ -37,8 +37,7 @@ bundle. Both are OFL-licensed and freely redistributable.
 ## mai-notes.com
 
 Chart data and the chart videos behind `/cc-chart` come from [mai-notes.com](https://mai-notes.com/)
-(maiノーツ), a community maimai chart database. The video is its own player, driven headlessly and
-recorded.
+(maiノーツ), a community maimai chart database. 
 
 ## Everything else
 
