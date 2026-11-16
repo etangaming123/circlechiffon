@@ -98,8 +98,7 @@ class LeechCog(commands.Cog):
             content=f"Offer sent to {leecher.mention}.", view=None, allowed_mentions=discord.AllowedMentions.none()
         )
         await interaction.followup.send(
-            f"{leecher.mention} - {host.mention} is offering you leech access to CiRCLE Chiffon, reading "
-            f"your data through their account as their maimai DX NET friend **{name}**.\n"
+            f"{leecher.mention} - {host.mention} is letting you browse maimai DX NET as **{name}** through their account.\n"
             f"If that's you, run `/cc-leech-accept user:{host.name}` (valid for 7 days).\n"
             f"-# {leech.LIMITS_SUMMARY}",
             allowed_mentions=discord.AllowedMentions(users=[leecher]),

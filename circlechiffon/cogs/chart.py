@@ -79,7 +79,7 @@ _RENDER_COOLDOWN_KEY = "cc-chart-render"
 _MAX_QUEUE = 5
 # Shown at the top of the progress message when `config.chart_render_server`
 # is set but can't take the render and this machine renders it instead.
-_REMOTE_DOWN_MESSAGE = "⚠️ Main renderer is down - this render will be slow."
+_REMOTE_DOWN_MESSAGE = "Main renderer is down - this render will be slow."
 # Shortest gap between two progress edits; Discord allows about 5 webhook
 # edits per 5 seconds on one message.
 _MIN_EDIT_INTERVAL = 1.5
@@ -160,8 +160,7 @@ _CHART_TYPE_CHOICES = [
 # is heavily skewed - it's a chart-study site, so the hard difficulties are
 # the ones people have transcribed.
 _COVERAGE_HINT = (
-    "mai-notes has playable data for about **45%** of the charts it lists, "
-    "and it's mostly the hard ones - try **MASTER**."
+    "mai-notes has playable data for about **45%** of the charts it lists. try the master/remaster difficulty, or a different chart."
 )
 
 
@@ -254,7 +253,7 @@ class ChartCog(commands.Cog):
         description="Look up a chart on mai-notes.com and render it as a video",
     )
     @app_commands.describe(
-        title="Song title (or part of it, including English/romanized aliases) to search for",
+        title="Song title to search for",
         difficulty="Which difficulty's chart to render (default: MASTER)",
         chart_type="DX or Standard chart, for songs that have both (default: DX)",
         notespeed="Note speed / ハイスピ, 1.0-10.0 (default: 7.5)",
@@ -312,8 +311,7 @@ class ChartCog(commands.Cog):
                 bail()
                 await interaction.edit_original_response(
                     content=(
-                        f"mai-notes.com doesn't have **{song.title}**. It only carries songs that are "
-                        "currently in the game, so anything removed for licensing reasons is missing there."
+                        f"mai-notes.com doesn't have **{song.title}** (it only carries songs that are currently in the game)"
                     )
                 )
                 return
@@ -327,9 +325,7 @@ class ChartCog(commands.Cog):
                 others = ", ".join(t.value.upper() for t in available_types)
                 await interaction.edit_original_response(
                     content=(
-                        f"mai-notes.com doesn't list a **{wanted_type.value.upper()} "
-                        f"{wanted_difficulty.display_name}** chart for **{song.title}** "
-                        f"(it has: {others})."
+                        f"mai-notes.com doesn't list a **{wanted_type.value.upper()} {wanted_difficulty.display_name}** chart for **{song.title}** (it has: {others})"
                     )
                 )
                 return
@@ -350,8 +346,7 @@ class ChartCog(commands.Cog):
                 embed.set_footer(text="Chart data from mai-notes.com")
                 await interaction.edit_original_response(
                     content=(
-                        "Rendering chart videos is limited to whitelisted users - ask the bot owner "
-                        "if you'd like access. Here's this chart's data instead."
+                        "showing chart data instead (chart rendering is limited to whitelisted users - ask etangaming123)"
                     ),
                     embed=embed,
                 )
@@ -362,8 +357,7 @@ class ChartCog(commands.Cog):
                 embed.set_footer(text="Chart data from mai-notes.com")
                 await interaction.edit_original_response(
                     content=(
-                        f"mai-notes.com lists this chart but has no playable data for it, so there's "
-                        f"nothing to render. {_COVERAGE_HINT}"
+                        f"mai-notes.com lists this chart but has no playable data for it, so there's nothing to render. {_COVERAGE_HINT}"
                     ),
                     embed=embed,
                 )
@@ -374,8 +368,7 @@ class ChartCog(commands.Cog):
                 embed.set_footer(text="Chart data from mai-notes.com")
                 await interaction.edit_original_response(
                     content=(
-                        "Rendering chart videos needs `ffmpeg` on the host and this instance doesn't "
-                        "have it, so here's the chart's data instead."
+                        "`ffmpeg` not found on host. showing chart data instead."
                     ),
                     embed=embed,
                 )
@@ -409,16 +402,16 @@ class ChartCog(commands.Cog):
             await interaction.edit_original_response(content=content, embed=embed)
 
         if _queue.has(user_id):
-            await refuse("You already have a chart render queued or running - here's this chart's data meanwhile.")
+            await refuse("You already have a chart render queued or running. showing chart data instead")
             return
         retry_at = None if owner else access.cooldown_until(user_id, _RENDER_COOLDOWN_KEY)
         if retry_at is not None:
             await refuse(
-                f"You can render another chart <t:{round(retry_at)}:R> - here's this chart's data meanwhile."
+                f"You can render another chart <t:{round(retry_at)}:R>. showing chart data instead"
             )
             return
         if len(_queue) >= _MAX_QUEUE:
-            await refuse("Chart renders are backed up right now - give it a minute and try again.")
+            await refuse("come back in a bit, render queue full.")
             return
 
         async def on_wait(ahead: int) -> None:
@@ -536,7 +529,7 @@ class ChartCog(commands.Cog):
                 bail()
                 embed.set_footer(text="Chart data from mai-notes.com")
                 await interaction.edit_original_response(
-                    content=f"Chart rendering isn't set up on this instance ({e}). Here's the chart's data instead.",
+                    content=f"Chart rendering isn't set up on this instance ({e}). showing chart data instead.",
                     embed=embed,
                 )
                 return False

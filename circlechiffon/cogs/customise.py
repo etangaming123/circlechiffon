@@ -26,7 +26,7 @@ _PART_CHOICES = [
     app_commands.Choice(name="Layout", value="layout"),
 ]
 
-_NOT_WHITELISTED = "Custom templates are limited to whitelisted users - ask the bot owner if you'd like access."
+_NOT_WHITELISTED = "Custom templates are limited to whitelisted users. ask etangaming123."
 
 
 class CustomiseCog(commands.Cog):

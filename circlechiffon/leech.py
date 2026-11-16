@@ -28,13 +28,13 @@ OFFER_TTL = timedelta(days=7)
 
 NOT_LINKED_MESSAGE = "You haven't linked a maimai DX NET account yet. Run `/cc-login` first."
 LEECH_UNSUPPORTED_MESSAGE = (
-    "You're using leech mode, which only covers `/cc-profile`, `/cc-best` and `/cc-scores` - "
-    "SEGA doesn't expose that data for a friend. Run `/cc-login` to link your own SEGA ID for this command."
+    "You're using leech mode, which only covers `/cc-profile`, `/cc-best` and `/cc-scores`. "
+    "Run `/cc-login` to link your own SEGA ID for this command."
 )
 
 # What leech users can and can't see, shown on accept and quoted from the docs.
 LIMITS_SUMMARY = (
-    "Data comes from the host's friend view of you: achievement and combo/sync only - no DX score, "
+    "Data comes from the host viewing your profile: achievement and combo/sync only - no DX score, "
     "play counts or last-played times, and your rating is computed locally. "
     "Commands that need your own account (`/cc-recent`, `/cc-album`, `/cc-circle`, `/cc-display`, "
     "`/cc-preset-*`, `/cc-friends`, the friend and leaderboard commands) don't work in leech mode."
@@ -56,8 +56,7 @@ def data_note(host_name: str | None = None) -> str:
     """One-line footer/caption for a render built from leech data."""
     via = f" via {host_name}'s link" if host_name else ""
     return (
-        f"Leech mode{via}: achievement and combo/sync only, no DX score or play counts; "
-        "rating is computed locally."
+        f"running in leech mode{via} - limited view"
     )
 
 
@@ -168,7 +167,7 @@ async def with_host_client(host_id: int, operation, on_retry: Callable[[], Await
     try:
         return await accounts.with_client(host_id, operation, on_retry=on_retry, is_owner=False)
     except accounts.NotLinked:
-        raise LeechBroken("The host of your leech link has unlinked their account. Ask them to set it up again.")
+        raise LeechBroken("The host of your leech link has unlinked their account.")
     except SessionExpired:
         raise LeechBroken("The host's maimai DX NET session has expired. Ask them to `/cc-login` again.")
 
@@ -190,8 +189,7 @@ async def fetch_entry(link: LeechLink) -> FriendEntry:
     entry = await with_host_client(link.host_id, fetch)
     if entry is None:
         raise LeechBroken(
-            "Couldn't find you on the host's friend list any more. Ask them to check you're still "
-            "friends on maimai DX NET and run `/cc-leech-send` again."
+            "Couldn't find you on the host's friend list any more. Ask them to check you're still friends on maimai DX NET and run `/cc-leech-send` again."
         )
     if entry.idx != link.friend_idx:
         await _update_idx(link, entry)
