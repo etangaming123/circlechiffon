@@ -87,6 +87,10 @@ class Config:
         # Keep data/dxdata.json fresh from upstream while the bot runs (cogs/dxdata.py).
         # Set false to update by hand with update_dxdata.py instead.
         self.auto_update_dxdata = bool(data.get("auto_update_dxdata", True))
+        # webworld (etan's web world) base URL for `/cc-login webworld:True`: users link their SEGA ID there and
+        # give the bot a token; DX NET is then reached through webworld (adapters/maimai_net/webworld.py).
+        # "" turns the option off.
+        self.webworld_url = str(data.get("webworld_url", "https://etangaming.xyz") or "").strip().rstrip("/")
 
 
 config = Config()

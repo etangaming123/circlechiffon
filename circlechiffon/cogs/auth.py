@@ -6,6 +6,10 @@ argument, so they never appear in chat/interaction logs). By default they're
 used once to perform the SEGA ID gateway login and then discarded - only the
 resulting session cookie is persisted (encrypted).
 
+/cc-login's `webworld` option links through a webworld (etan's web world) account instead: the user links their SEGA ID
+there, makes a token, and pastes only that token here. No SEGA credential ever reaches the bot; DX NET is reached through
+webworld's relay (adapters/maimai_net/webworld.py). The webworld address is config.json `webworld_url`.
+
 /cc-login also has an opt-in `remember_password` option: if set, the
 SEGA ID username/password are ALSO stored (encrypted), after an explicit
 warning + confirmation, so the bot can silently re-login when the session
@@ -17,8 +21,10 @@ from discord import app_commands
 from discord.ext import commands
 
 from circlechiffon import access, accounts, leech
+from circlechiffon.adapters.maimai_net import webworld
 from circlechiffon.adapters.maimai_net.client import MaimaiNetClient
 from circlechiffon.adapters.maimai_net.errors import MaimaiNetError, TotpRequired
+from config import config
 
 REMEMBER_PASSWORD_WARNING = (
     "**Warning: this stores your SEGA ID password.**\n\n"
@@ -116,6 +122,67 @@ class SegaLoginModal(discord.ui.Modal, title="Link your maimai DX NET account"):
             await interaction.response.send_message(content=message, ephemeral=True)
 
 
+class WebworldTokenModal(discord.ui.Modal, title="Link through webworld"):
+    token = discord.ui.TextInput(
+        label="webworld token",
+        placeholder="mm_...",
+        required=True,
+        min_length=20,
+        max_length=128,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        value = self.token.value.strip()
+        base = webworld.normalise_url(config.webworld_url)
+        if base is None:
+            await interaction.edit_original_response(content="Linking through webworld isn't set up on this bot (no `webworld_url`).")
+            return
+        if not value.startswith(webworld.TOKEN_PREFIX):
+            await interaction.edit_original_response(
+                content="That doesn't look like a webworld token (they start with `mm_`). Make one in webworld's maimai DX NET app, under Account."
+            )
+            return
+        client = webworld.WebworldClient(base, value)
+        try:
+            try:
+                me = await client.whoami()
+            except MaimaiNetError as e:
+                await interaction.edit_original_response(content=f"Login failed: {e}")
+                return
+            if not me.get("linked"):
+                await interaction.edit_original_response(
+                    content="That token works, but no SEGA ID is linked in webworld yet. Link it in webworld's maimai DX NET app (Account), then run `/cc-login` again."
+                )
+                return
+            profile = None
+            try:
+                profile = await client.get_profile()
+            except MaimaiNetError:
+                pass
+            await accounts.save_webworld(interaction.user.id, client, display_name=(profile.display_name if profile else None) or me.get("name") or None)
+        except Exception as e:
+            await interaction.edit_original_response(content=f"Login failed: unexpected error ({type(e).__name__}: {e})")
+            return
+        finally:
+            await client.close()
+        name = (profile.display_name if profile else None) or me.get("name")
+        await interaction.edit_original_response(
+            content=(
+                "Linked through webworld! Welcome" + (f", **{name}**!" if name else "!")
+                + " CiRCLE Chiffon only holds your webworld token (encrypted); your SEGA ID and password stay out of it."
+                + " Revoking the token in webworld unlinks it, and `/cc-logout` forgets it here."
+            )
+        )
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
+        message = f"Login failed: unexpected error ({type(error).__name__}: {error})"
+        if interaction.response.is_done():
+            await interaction.edit_original_response(content=message)
+        else:
+            await interaction.response.send_message(content=message, ephemeral=True)
+
+
 class RememberPasswordWarningView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=30)
@@ -152,12 +219,22 @@ class AuthCog(commands.Cog):
     @app_commands.describe(
         remember_password=(
             "Also store your SEGA ID password (encrypted) so I can auto re-login when your session expires. Use at your own risk."
-        )
+        ),
+        webworld="Only available for those who have an account on etan's webworld.",
     )
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-    async def login(self, interaction: discord.Interaction, remember_password: bool = False):
+    async def login(self, interaction: discord.Interaction, remember_password: bool = False, webworld: bool = False):
         if not await access.handle_command_access(interaction, interaction.user.id, "cc-login", access.MAIMAI_NET_COOLDOWN):
+            return
+        if webworld:
+            if remember_password:
+                await interaction.response.send_message(
+                    content="`remember_password` doesn't apply to a webworld link (the bot never sees your password). Run `/cc-login webworld:True` on its own.",
+                    ephemeral=True,
+                )
+                return
+            await interaction.response.send_modal(WebworldTokenModal())
             return
         if remember_password:
             view = RememberPasswordWarningView()

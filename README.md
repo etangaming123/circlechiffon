@@ -151,6 +151,8 @@ ffmpeg and `skia-python` are checked at runtime. Without them `/cc-chart` still 
 
 Run the bot once with `python main.py` - it will create a `config.json` for you and prompt you to fill in your bot token (and optionally your Discord user ID as `owner_id`) before continuing.
 
+Optional: `"webworld_url"` in `config.json` is the webworld site that `/cc-login webworld:True` tokens belong to (default `https://etangaming.xyz`; set it to `""` to switch the option off). Only that address is ever contacted with a token: users can't point the bot at another server.
+
 #### Encryption key (recommended)
 
 Session tokens, and SEGA ID credentials for users who opt into `remember_password`, are encrypted at rest. By default the encryption key is auto-generated into a local file (`.circlechiffon.key`) on first run - this works out of the box, but the key ends up sitting on disk right next to what it unlocks.

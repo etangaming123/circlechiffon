@@ -12,6 +12,7 @@ from sqlalchemy import delete
 
 import crypto_utils
 from circlechiffon.adapters.maimai_net.client import MaimaiNetClient
+from circlechiffon.adapters.maimai_net import webworld
 from circlechiffon.adapters.dxrating import status as dxnet_status
 from circlechiffon.adapters.maimai_net.errors import MaintenanceError, MaimaiNetError, SessionExpired
 from circlechiffon import session_queue
@@ -28,13 +29,15 @@ class NotLinked(Exception):
 
 async def get_client(discord_id: int) -> MaimaiNetClient | None:
     """Returns a MaimaiNetClient built from the user's stored session cookie,
-    or None if they haven't linked an account."""
+    or None if they haven't linked an account. An account linked through
+    webworld stores a {"webworld": {url, token}} marker instead of cookies and
+    gets a WebworldClient (same interface, requests relayed by webworld)."""
     async with db_engine.session() as session:
         account = await session.get(Account, discord_id)
         if account is None:
             return None
         cookies_json = crypto_utils.decrypt_value(account.encrypted_cookie)
-        return MaimaiNetClient.from_cookies_json(cookies_json)
+        return webworld.client_from_stored(cookies_json) or MaimaiNetClient.from_cookies_json(cookies_json)
 
 
 async def save_session(discord_id: int, client: MaimaiNetClient, region: str = "intl", display_name: str | None = None) -> None:
@@ -236,6 +239,26 @@ async def delete_account(discord_id: int) -> bool:
         await session.execute(delete(LeechLink).where(LeechLink.host_id == discord_id))
         await session.commit()
         return result.rowcount > 0
+
+
+async def is_webworld(discord_id: int) -> bool:
+    """True if this account reaches DX NET through a webworld token rather than its own cookies."""
+    async with db_engine.session() as session:
+        account = await session.get(Account, discord_id)
+        if account is None:
+            return False
+        return webworld.stored_marker(crypto_utils.decrypt_value(account.encrypted_cookie)) is not None
+
+
+async def save_webworld(discord_id: int, client: "webworld.WebworldClient", display_name: str | None = None) -> None:
+    """Link (or relink) this Discord user through webworld. Any stored SEGA ID password is dropped: it is never needed
+    again, and keeping it would be a credential with no purpose."""
+    await save_session(discord_id, client, region="intl", display_name=display_name)
+    async with db_engine.session() as session:
+        account = await session.get(Account, discord_id)
+        if account is not None and account.encrypted_credentials is not None:
+            account.encrypted_credentials = None
+            await session.commit()
 
 
 async def is_linked(discord_id: int) -> bool:
